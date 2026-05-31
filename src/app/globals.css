@@ -1,26 +1,158 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@variant dark selector;
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
+@layer base {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    /* Light mode with custom colors: FAFAFA, 0A7C6E, F59E0B, FF6B35 */
+    --background: 0 0% 98%; /* FAFAFA */
+    --foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+    --muted: 221 39.3% 11%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 37.7 92.1% 50.2%; /* F59E0B */
+    --accent-foreground: 210 40% 98%;
+    --destructive: 16.3 100% 60.4%; /* FF6B35 */
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 172.6 85.1% 26.3%;
+    --primary: 172.6 85.1% 26.3%; /* 0A7C6E */
+    --primary-foreground: 210 40% 98%;
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.3% 65.1%;
+    --accent: 346.8 77.2% 49.8%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 346.8 77.2% 49.8%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --font-sans: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --border-radius: var(--radius);
+}
+
+html {
+  direction: rtl;
+}
+
+body,
+input,
+select {
+  font: inherit;
+}
+
+.panel {
+  border: 1px solid #dce5df;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 16px;
+  box-shadow: 0 8px 24px rgb(16 25 22 / 4%);
+}
+
+.field {
+  height: 40px;
+  width: 100%;
+  border-radius: 6px;
+  border: 1px solid #cbd8d1;
+  background: #ffffff;
+  padding: 0 12px;
+  color: #18211e;
+  outline: none;
+}
+
+.field:focus {
+  border-color: #0A7C6E;
+  box-shadow: 0 0 0 3px rgb(10 124 110 / 14%);
+}
+
+.primary-button,
+.danger-button,
+.icon-button {
+  display: inline-flex;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  padding: 0 14px;
+  font-size: 14px;
+  font-weight: 600;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.primary-button {
+  width: 100%;
+  background: #0A7C6E;
+  color: #ffffff;
+}
+
+.primary-button:hover {
+  background: #086156;
+}
+
+.danger-button {
+  border-color: #efc6c6;
+  background: #fff5f5;
+  color: #a33232;
+}
+
+.danger-button:hover {
+  background: #ffe8e8;
+}
+
+.icon-button {
+  width: 40px;
+  border-color: #cbd8d1;
+  background: #ffffff;
+  padding: 0;
+  color: #1d2b26;
+}
+
+.icon-button:hover {
+  border-color: #0A7C6E;
+  color: #0A7C6E;
 }
