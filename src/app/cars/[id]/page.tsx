@@ -788,7 +788,7 @@ export default function CarDetailPage({ params }: { params: Promise<{ id: string
               </div>
               <div className="flex justify-between py-1 border-b border-slate-100 dark:border-slate-800">
                 <span className="text-slate-500">سعر صرف الدولار:</span>
-                <span className="font-semibold">{car.exchange_rate} ليدي/$</span>
+                <span className="font-semibold">{car.exchange_rate} ليبي/$</span>
               </div>
               <div className="flex justify-between py-1 border-b border-slate-100 dark:border-slate-800">
                 <span className="text-slate-500">قيمة الشراء بالدينار:</span>

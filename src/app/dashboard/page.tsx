@@ -120,7 +120,7 @@ export default function DashboardPage() {
                 <div className="flex justify-between items-center p-3 bg-slate-50 dark:bg-slate-800 rounded-lg">
                   <span className="text-sm text-slate-600 dark:text-slate-400">معدل الصرف</span>
                   <span className="font-semibold">
-                    {metrics.averageExchangeRate.toFixed(2)} ليدي/$
+                    {metrics.averageExchangeRate.toFixed(2)} ليبي/$
                   </span>
                 </div>
                 <div className="flex justify-between items-center p-3 bg-slate-50 dark:bg-slate-800 rounded-lg">
@@ -142,7 +142,7 @@ export default function DashboardPage() {
                     {metrics.soldCars > 0
                       ? Math.round(metrics.totalProfit / metrics.soldCars).toLocaleString('ar-LY')
                       : 0}{' '}
-                    ليدي
+                    ليبي
                   </span>
                 </div>
               </div>
