@@ -74,12 +74,31 @@ export interface Car {
   updated_at: string;
 }
 
+export type ExpenseType =
+  | 'shipping'
+  | 'customs'
+  | 'clearance'
+  | 'link_fees'
+  | 'transportation'
+  | 'office'
+  | 'other'
+  | 'repair'
+  | 'maintenance'
+  | 'parts'
+  | 'tires'
+  | 'body_work'
+  | 'electrical'
+  | 'registration'
+  | 'insurance'
+  | 'other_car';
+
 export interface Expense {
   id: string;
   user_id: string;
   trip_id?: string;
   container_id?: string;
-  expense_type: 'shipping' | 'customs' | 'clearance' | 'link_fees' | 'transportation' | 'office' | 'other';
+  car_id?: string;
+  expense_type: ExpenseType;
   currency: 'USD' | 'LYD' | 'EUR';
   amount: number;
   paid_amount: number;

@@ -6,6 +6,7 @@ import { RtlLayout } from '@/components/shared/layout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { CAR_EXPENSE_LABELS } from '@/lib/cars/car-expenses';
 import { Loader, Plus, DollarSign, Wallet, FileText, Edit, Trash2, Package, ChevronDown, ChevronUp, AlertCircle, CheckCircle2 } from 'lucide-react';
 
 interface Expense {
@@ -21,10 +22,16 @@ interface Expense {
   date: string;
   notes?: string;
   exchange_rate?: number | null;
+  car_id?: string | null;
   containers?: {
     id: string;
     container_number: string;
     trips?: { trip_name: string } | null;
+  } | null;
+  cars?: {
+    id: string;
+    car_name: string;
+    vin_number?: string;
   } | null;
 }
 
@@ -40,6 +47,7 @@ interface Container {
 }
 
 const NO_CONTAINER_KEY = '__no_container__';
+const CAR_EXPENSE_PREFIX = 'car:';
 
 interface ExpenseGroup {
   key: string;
@@ -280,6 +288,7 @@ export default function ExpensesPage() {
       transportation: 'نقل وتوزيع داخلي',
       office: 'مصاريف مكاتب وإدارية',
       other: 'مصاريف متنوعة أخرى',
+      ...CAR_EXPENSE_LABELS,
     };
     return labels[type] || type;
   };
@@ -314,7 +323,9 @@ export default function ExpensesPage() {
     const map = new Map<string, Expense[]>();
 
     for (const expense of expenses) {
-      const key = expense.container_id || NO_CONTAINER_KEY;
+      const key = expense.car_id
+        ? `${CAR_EXPENSE_PREFIX}${expense.car_id}`
+        : expense.container_id || NO_CONTAINER_KEY;
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(expense);
     }
@@ -322,6 +333,7 @@ export default function ExpensesPage() {
     const groups: ExpenseGroup[] = Array.from(map.entries()).map(([key, groupExpenses]) => {
       const first = groupExpenses[0];
       const containerMeta = first?.containers;
+      const carMeta = first?.cars;
       const remainingUsd = groupExpenses
         .filter((e) => e.currency === 'USD')
         .reduce((s, e) => s + Number(e.remaining_amount || 0), 0);
@@ -336,8 +348,9 @@ export default function ExpensesPage() {
       return {
         key,
         containerId: key === NO_CONTAINER_KEY ? null : key,
-        label:
-          key === NO_CONTAINER_KEY
+        label: key.startsWith(CAR_EXPENSE_PREFIX)
+          ? `🚗 مصاريف السيارة: ${carMeta?.car_name || carMeta?.vin_number || 'سيارة'}`
+          : key === NO_CONTAINER_KEY
             ? 'مصاريف عامة (بدون حاوية)'
             : containerMeta?.container_number || `حاوية ${key.substring(0, 8)}`,
         tripName: containerMeta?.trips?.trip_name,

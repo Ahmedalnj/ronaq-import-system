@@ -1,4 +1,5 @@
 import { createServerSupabaseClient } from '@/lib/db/server';
+import { syncCarFinancialsFromExpenses } from '@/lib/cars/car-expenses';
 import { NextRequest, NextResponse } from 'next/server';
 import { expenseSchema } from '@/lib/validations/schemas';
 
@@ -14,11 +15,19 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { data, error } = await supabase
+    const { searchParams } = new URL(request.url);
+    const carId = searchParams.get('car_id');
+
+    let query = supabase
       .from('expenses')
-      .select('*, containers(id, container_number, trips(trip_name))')
-      .eq('user_id', user.id)
-      .order('date', { ascending: false });
+      .select('*, containers(id, container_number, trips(trip_name)), cars(id, car_name, vin_number)')
+      .eq('user_id', user.id);
+
+    if (carId) {
+      query = query.eq('car_id', carId);
+    }
+
+    const { data, error } = await query.order('date', { ascending: false });
 
     if (error) throw error;
 
@@ -80,8 +89,12 @@ export async function POST(request: NextRequest) {
         total_amount: validatedData.amount,
         paid_amount: validatedData.paid_amount,
         remaining_amount,
-        status: validatedData.paid_amount > 0 ? 'active' : 'active',
+        status: 'active',
       });
+    }
+
+    if (validatedData.car_id) {
+      await syncCarFinancialsFromExpenses(supabase, user.id, validatedData.car_id);
     }
 
     return NextResponse.json(data, { status: 201 });
@@ -140,6 +153,10 @@ export async function PUT(request: NextRequest) {
 
     if (error) throw error;
 
+    if (validatedData.car_id) {
+      await syncCarFinancialsFromExpenses(supabase, user.id, validatedData.car_id);
+    }
+
     return NextResponse.json(data);
   } catch (error) {
     console.error('Error updating expense:', error);
@@ -169,14 +186,19 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'Expense ID is required' }, { status: 400 });
     }
 
-    // 1. Delete associated liabilities first
+    const { data: existing } = await supabase
+      .from('expenses')
+      .select('car_id')
+      .eq('id', id)
+      .eq('user_id', user.id)
+      .single();
+
     await supabase
       .from('liabilities')
       .delete()
       .eq('expense_id', id)
       .eq('user_id', user.id);
 
-    // 2. Delete the expense
     const { error: deleteError } = await supabase
       .from('expenses')
       .delete()
@@ -184,6 +206,10 @@ export async function DELETE(request: NextRequest) {
       .eq('user_id', user.id);
 
     if (deleteError) throw deleteError;
+
+    if (existing?.car_id) {
+      await syncCarFinancialsFromExpenses(supabase, user.id, existing.car_id);
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {

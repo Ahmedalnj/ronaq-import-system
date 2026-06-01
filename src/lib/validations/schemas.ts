@@ -108,9 +108,28 @@ export const carSchema = z
     }
   });
 
+const expenseTypeEnum = z.enum([
+  'shipping',
+  'customs',
+  'clearance',
+  'link_fees',
+  'transportation',
+  'office',
+  'other',
+  'repair',
+  'maintenance',
+  'parts',
+  'tires',
+  'body_work',
+  'electrical',
+  'registration',
+  'insurance',
+  'other_car',
+]);
+
 // Expense Schemas
 export const expenseSchema = z.object({
-  expense_type: z.enum(['shipping', 'customs', 'clearance', 'link_fees', 'transportation', 'office', 'other']),
+  expense_type: expenseTypeEnum,
   currency: z.enum(['USD', 'LYD', 'EUR']),
   amount: z.number().min(0),
   paid_amount: z.number().min(0),
@@ -119,6 +138,7 @@ export const expenseSchema = z.object({
   notes: z.string().optional(),
   trip_id: optionalUuidSchema,
   container_id: optionalUuidSchema,
+  car_id: optionalUuidSchema,
   exchange_rate: z.number().min(0).optional().nullable(),
 });
 

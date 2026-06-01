@@ -7,7 +7,8 @@ import { RtlLayout } from '@/components/shared/layout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Loader, ArrowRight, Upload, Trash2, Maximize2, X, ChevronLeft, ChevronRight, DollarSign, ShieldAlert, Award, Pencil, CheckCircle } from 'lucide-react';
+import { CAR_EXPENSE_LABELS, CAR_EXPENSE_TYPES } from '@/lib/cars/car-expenses';
+import { Loader, ArrowRight, Upload, Trash2, Maximize2, X, ChevronLeft, ChevronRight, DollarSign, ShieldAlert, Award, Pencil, CheckCircle, Plus, Receipt, Wrench } from 'lucide-react';
 import Link from 'next/link';
 import { createClient } from '@/lib/db/client';
 
@@ -58,6 +59,31 @@ export default function CarDetailPage({ params }: { params: Promise<{ id: string
   const [sellingPrice, setSellingPrice] = useState('');
   const [carStatus, setCarStatus] = useState<Car['status']>('available');
   const [containerExpenses, setContainerExpenses] = useState<any[]>([]);
+  const [carExpenses, setCarExpenses] = useState<CarExpense[]>([]);
+  const [showCarExpenseForm, setShowCarExpenseForm] = useState(false);
+  const [carExpenseSubmitting, setCarExpenseSubmitting] = useState(false);
+  const [newCarExpense, setNewCarExpense] = useState({
+    expense_type: 'repair' as string,
+    currency: 'LYD' as 'LYD' | 'USD' | 'EUR',
+    amount: 0,
+    paid_amount: 0,
+    date: new Date().toISOString().split('T')[0],
+    notes: '',
+    exchange_rate: '' as string | number,
+  });
+
+  interface CarExpense {
+    id: string;
+    expense_type: string;
+    currency: 'LYD' | 'USD' | 'EUR';
+    amount: number;
+    paid_amount: number;
+    remaining_amount: number;
+    status: 'paid' | 'partial' | 'unpaid';
+    date: string;
+    notes?: string;
+    exchange_rate?: number | null;
+  }
 
   const getExpenseLabel = (type: string) => {
     const labels: Record<string, string> = {
@@ -68,8 +94,18 @@ export default function CarDetailPage({ params }: { params: Promise<{ id: string
       transportation: 'نقل وتوزيع داخلي',
       office: 'مصاريف مكاتب وإدارية',
       other: 'مصاريف متنوعة أخرى',
+      ...CAR_EXPENSE_LABELS,
     };
     return labels[type] || type;
+  };
+
+  const getExpenseStatusLabel = (status: string) => {
+    const labels: Record<string, string> = {
+      paid: 'مدفوع',
+      partial: 'جزئي',
+      unpaid: 'غير مدفوع',
+    };
+    return labels[status] || status;
   };
 
   const supabase = createClient();
@@ -312,14 +348,22 @@ export default function CarDetailPage({ params }: { params: Promise<{ id: string
         setSellingPrice(foundCar.selling_price?.toString() || '');
         setCarStatus(foundCar.status);
 
-        // Fetch container expenses
+        const carExpRes = await fetch(`/api/cars/${id}/expenses`);
+        if (carExpRes.ok) {
+          setCarExpenses(await carExpRes.json());
+        }
+
         if (foundCar.container_id) {
           const expResponse = await fetch('/api/expenses');
           if (expResponse.ok) {
             const expData = await expResponse.json();
-            const filtered = expData.filter((e: any) => e.container_id === foundCar.container_id);
+            const filtered = expData.filter(
+              (e: any) => e.container_id === foundCar.container_id && !e.car_id
+            );
             setContainerExpenses(filtered);
           }
+        } else {
+          setContainerExpenses([]);
         }
       } catch (err: any) {
         setError(err.message);
@@ -335,6 +379,101 @@ export default function CarDetailPage({ params }: { params: Promise<{ id: string
     return isUsd
       ? `$${val.toLocaleString('en-US', { minimumFractionDigits: 2 })}`
       : `${val.toLocaleString('ar-LY', { minimumFractionDigits: 2 })} د.ل`;
+  };
+
+  const moneyFormatCurrency = (val: number, currency: string) => {
+    if (currency === 'USD') return moneyFormat(val, true);
+    if (currency === 'EUR') return `€${val.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+    return moneyFormat(val);
+  };
+
+  const refreshCarAndExpenses = async () => {
+    const [carsRes, carExpRes] = await Promise.all([
+      fetch('/api/cars'),
+      fetch(`/api/cars/${id}/expenses`),
+    ]);
+    if (carsRes.ok) {
+      const data: Car[] = await carsRes.json();
+      const found = data.find((c) => c.id === id);
+      if (found) setCar(found);
+    }
+    if (carExpRes.ok) {
+      setCarExpenses(await carExpRes.json());
+    }
+  };
+
+  const handleCarExpenseSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCarExpenseSubmitting(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      const amountNum = Number(newCarExpense.amount);
+      const paidNum = Number(newCarExpense.paid_amount);
+      let status: CarExpense['status'] = 'unpaid';
+      if (paidNum >= amountNum) status = 'paid';
+      else if (paidNum > 0) status = 'partial';
+
+      const body: Record<string, unknown> = {
+        expense_type: newCarExpense.expense_type,
+        currency: newCarExpense.currency,
+        amount: amountNum,
+        paid_amount: paidNum,
+        status,
+        date: newCarExpense.date,
+        notes: newCarExpense.notes || undefined,
+      };
+      if (newCarExpense.currency !== 'LYD' && newCarExpense.exchange_rate) {
+        body.exchange_rate = Number(newCarExpense.exchange_rate);
+      }
+
+      const response = await fetch(`/api/cars/${id}/expenses`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error || 'فشل في تسجيل مصروف السيارة');
+      }
+
+      const result = await response.json();
+      if (result.car) setCar(result.car);
+      setCarExpenses((prev) => [result.expense, ...prev]);
+      setSuccess('تم تسجيل مصروف السيارة وتحديث التكلفة النهائية.');
+      setShowCarExpenseForm(false);
+      setNewCarExpense({
+        expense_type: 'repair',
+        currency: 'LYD',
+        amount: 0,
+        paid_amount: 0,
+        date: new Date().toISOString().split('T')[0],
+        notes: '',
+        exchange_rate: '',
+      });
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'حدث خطأ');
+    } finally {
+      setCarExpenseSubmitting(false);
+    }
+  };
+
+  const handleDeleteCarExpense = async (expenseId: string) => {
+    if (!window.confirm('حذف هذا المصروف؟ سيتم إعادة احتساب تكلفة السيارة.')) return;
+    setError('');
+    try {
+      const response = await fetch(`/api/expenses?id=${expenseId}`, { method: 'DELETE' });
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error || 'فشل الحذف');
+      }
+      setSuccess('تم حذف المصروف وتحديث التكلفة.');
+      await refreshCarAndExpenses();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'حدث خطأ');
+    }
   };
 
   // Image Upload Handler to Supabase Storage
@@ -889,7 +1028,7 @@ export default function CarDetailPage({ params }: { params: Promise<{ id: string
                 </div>
               )}
               <div className="flex justify-between py-1 border-b border-slate-100 dark:border-slate-800">
-                <span className="text-slate-500">نصيب مصاريف الرحلة العامة:</span>
+                <span className="text-slate-500">مصاريف السيارة (تصليح، صيانة، ...):</span>
                 <span className="font-semibold text-purple-600">+{moneyFormat(car.expense_allocation)}</span>
               </div>
               {Number(car.other_allocation) > 0 && (
@@ -947,6 +1086,196 @@ export default function CarDetailPage({ params }: { params: Promise<{ id: string
           </Card>
 
         </div>
+
+        {/* Car-specific expenses (repair, maintenance, etc.) */}
+        <Card className="border-[#0A7C6E]/20">
+          <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-4">
+            <div>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Wrench className="w-5 h-5 text-[#0A7C6E]" />
+                مصاريف السيارة
+              </CardTitle>
+              <CardDescription>
+                تصليح، قطع غيار، صيانة، ترخيص، وغيرها — تُضاف تلقائياً إلى التكلفة النهائية للسيارة
+              </CardDescription>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              className="gap-1 bg-[#0A7C6E] hover:bg-[#086156]"
+              onClick={() => setShowCarExpenseForm((v) => !v)}
+            >
+              <Plus className="w-4 h-4" />
+              {showCarExpenseForm ? 'إلغاء' : 'إضافة مصروف'}
+            </Button>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {showCarExpenseForm && (
+              <form
+                onSubmit={handleCarExpenseSubmit}
+                className="p-4 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/30 space-y-4"
+              >
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <label className="block">
+                    <span className="text-sm text-slate-500 mb-1 block">نوع المصروف</span>
+                    <select
+                      className="w-full h-10 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 text-sm"
+                      value={newCarExpense.expense_type}
+                      onChange={(e) => setNewCarExpense({ ...newCarExpense, expense_type: e.target.value })}
+                      required
+                    >
+                      {CAR_EXPENSE_TYPES.map((t) => (
+                        <option key={t} value={t}>
+                          {CAR_EXPENSE_LABELS[t]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="text-sm text-slate-500 mb-1 block">العملة</span>
+                    <select
+                      className="w-full h-10 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 text-sm"
+                      value={newCarExpense.currency}
+                      onChange={(e) =>
+                        setNewCarExpense({
+                          ...newCarExpense,
+                          currency: e.target.value as 'LYD' | 'USD' | 'EUR',
+                        })
+                      }
+                    >
+                      <option value="LYD">دينار ليبي</option>
+                      <option value="USD">دولار</option>
+                      <option value="EUR">يورو</option>
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="text-sm text-slate-500 mb-1 block">التاريخ</span>
+                    <Input
+                      type="date"
+                      required
+                      value={newCarExpense.date}
+                      onChange={(e) => setNewCarExpense({ ...newCarExpense, date: e.target.value })}
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-sm text-slate-500 mb-1 block">المبلغ الكلي</span>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      required
+                      value={newCarExpense.amount || ''}
+                      onChange={(e) => setNewCarExpense({ ...newCarExpense, amount: Number(e.target.value) })}
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-sm text-slate-500 mb-1 block">المبلغ المدفوع</span>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={newCarExpense.paid_amount || ''}
+                      onChange={(e) =>
+                        setNewCarExpense({ ...newCarExpense, paid_amount: Number(e.target.value) })
+                      }
+                    />
+                  </label>
+                  {newCarExpense.currency !== 'LYD' && (
+                    <label className="block">
+                      <span className="text-sm text-slate-500 mb-1 block">سعر الصرف (اختياري)</span>
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder={String(car.exchange_rate)}
+                        value={newCarExpense.exchange_rate}
+                        onChange={(e) =>
+                          setNewCarExpense({ ...newCarExpense, exchange_rate: e.target.value })
+                        }
+                      />
+                    </label>
+                  )}
+                  <label className="block md:col-span-2 lg:col-span-3">
+                    <span className="text-sm text-slate-500 mb-1 block">ملاحظات</span>
+                    <Input
+                      value={newCarExpense.notes}
+                      onChange={(e) => setNewCarExpense({ ...newCarExpense, notes: e.target.value })}
+                      placeholder="مثال: تغيير زيت، سمكرة باب أمامي..."
+                    />
+                  </label>
+                </div>
+                <Button type="submit" disabled={carExpenseSubmitting} className="bg-[#0A7C6E] hover:bg-[#086156]">
+                  {carExpenseSubmitting ? 'جاري الحفظ...' : 'حفظ المصروف'}
+                </Button>
+              </form>
+            )}
+
+            {carExpenses.length === 0 ? (
+              <p className="text-sm text-slate-500 text-center py-6 bg-slate-50 dark:bg-slate-800/40 rounded-lg">
+                لا توجد مصاريف مسجلة لهذه السيارة بعد.
+              </p>
+            ) : (
+              <div className="overflow-x-auto rounded-lg border border-slate-100 dark:border-slate-800">
+                <table className="w-full text-right text-sm">
+                  <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-600">
+                    <tr>
+                      <th className="px-4 py-2 font-medium">النوع</th>
+                      <th className="px-4 py-2 font-medium">المبلغ</th>
+                      <th className="px-4 py-2 font-medium">مدفوع</th>
+                      <th className="px-4 py-2 font-medium">متبقي</th>
+                      <th className="px-4 py-2 font-medium">الحالة</th>
+                      <th className="px-4 py-2 font-medium">التاريخ</th>
+                      <th className="px-4 py-2 font-medium w-16"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {carExpenses.map((exp) => (
+                      <tr key={exp.id}>
+                        <td className="px-4 py-3 font-medium">
+                          {getExpenseLabel(exp.expense_type)}
+                          {exp.notes && (
+                            <span className="block text-xs text-slate-500 font-normal mt-0.5">{exp.notes}</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">{moneyFormatCurrency(exp.amount, exp.currency)}</td>
+                        <td className="px-4 py-3 text-green-600">
+                          {moneyFormatCurrency(exp.paid_amount, exp.currency)}
+                        </td>
+                        <td className="px-4 py-3 text-red-600">
+                          {Number(exp.remaining_amount) > 0
+                            ? moneyFormatCurrency(exp.remaining_amount, exp.currency)
+                            : '—'}
+                        </td>
+                        <td className="px-4 py-3 text-xs">{getExpenseStatusLabel(exp.status)}</td>
+                        <td className="px-4 py-3 text-slate-500 text-xs">
+                          {new Date(exp.date).toLocaleDateString('ar-LY')}
+                        </td>
+                        <td className="px-4 py-3">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="text-red-600 hover:text-red-700 h-8 w-8 p-0"
+                            onClick={() => handleDeleteCarExpense(exp.id)}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {carExpenses.length > 0 && (
+              <p className="text-xs text-slate-500 flex items-center gap-1">
+                <Receipt className="w-3.5 h-3.5" />
+                مجموع مصاريف السيارة في التكلفة النهائية: {moneyFormat(car.expense_allocation)}
+              </p>
+            )}
+          </CardContent>
+        </Card>
 
       </div>
 
