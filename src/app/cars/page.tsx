@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { containerFullMessage } from '@/lib/containers/capacity';
 import { useAuth } from '@/hooks/use-auth';
 import { RtlLayout } from '@/components/shared/layout';
 import { Button } from '@/components/ui/button';
@@ -19,6 +20,7 @@ interface Trip {
 interface Container {
   id: string;
   container_number?: string;
+  cars_count?: number;
 }
 
 interface Car {
@@ -197,19 +199,38 @@ export default function CarsPage() {
     fetchData();
   }, [user]);
 
-  // Fetch unique containers for selection
   useEffect(() => {
     if (!user) return;
     const fetchContainers = async () => {
       try {
-        const { data } = await supabase.from('containers').select('id, container_number');
-        if (data) setContainers(data);
+        const response = await fetch('/api/containers');
+        if (response.ok) {
+          const data = await response.json();
+          setContainers(data);
+        }
       } catch (e) {
         console.error('Failed to load containers for selection:', e);
       }
     };
     fetchContainers();
   }, [user]);
+
+  const containerUsage = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const car of cars) {
+      if (car.container_id) {
+        map[car.container_id] = (map[car.container_id] || 0) + 1;
+      }
+    }
+    return map;
+  }, [cars]);
+
+  const getContainerSlotInfo = (containerId: string) => {
+    const container = containers.find((c) => c.id === containerId);
+    const capacity = Number(container?.cars_count) || 6;
+    const used = containerUsage[containerId] || 0;
+    return { capacity, used, isFull: used >= capacity, label: container?.container_number };
+  };
 
   const handleAddCarSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -218,6 +239,15 @@ export default function CarsPage() {
     setSuccess('');
 
     try {
+      if (newCar.container_id) {
+        const slot = getContainerSlotInfo(newCar.container_id);
+        if (slot.isFull) {
+          throw new Error(
+            containerFullMessage(slot.label || newCar.container_id.substring(0, 8), slot.capacity)
+          );
+        }
+      }
+
       const response = await fetch('/api/cars', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -406,12 +436,33 @@ export default function CarsPage() {
                         onChange={(e) => setNewCar({ ...newCar, container_id: e.target.value })}
                       >
                         <option value="">لا يوجد حاوية</option>
-                        {containers.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.container_number || c.id.substring(0, 8)}
-                          </option>
-                        ))}
+                        {containers.map((c) => {
+                          const capacity = Number(c.cars_count) || 6;
+                          const used = containerUsage[c.id] || 0;
+                          const isFull = used >= capacity;
+                          return (
+                            <option key={c.id} value={c.id} disabled={isFull}>
+                              {c.container_number || c.id.substring(0, 8)} ({used}/{capacity} سيارات)
+                              {isFull ? ' — ممتلئة' : ''}
+                            </option>
+                          );
+                        })}
                       </select>
+                      {newCar.container_id && (() => {
+                        const slot = getContainerSlotInfo(newCar.container_id);
+                        if (slot.isFull) {
+                          return (
+                            <p className="text-xs text-red-600 mt-1 font-semibold">
+                              {containerFullMessage(slot.label || '', slot.capacity)}
+                            </p>
+                          );
+                        }
+                        return (
+                          <p className="text-xs text-slate-500 mt-1">
+                            متبقي في الحاوية: {slot.capacity - slot.used} من {slot.capacity} سيارات
+                          </p>
+                        );
+                      })()}
                     </label>
                   </div>
 
@@ -503,7 +554,16 @@ export default function CarsPage() {
                   )}
 
                   <div className="flex gap-3 pt-4 border-t border-slate-100 dark:border-slate-800">
-                    <Button type="submit" className="flex-1 bg-[#0A7C6E] hover:bg-[#086156]" disabled={submitting}>
+                    <Button
+                      type="submit"
+                      className="flex-1 bg-[#0A7C6E] hover:bg-[#086156]"
+                      disabled={
+                        submitting ||
+                        Boolean(
+                          newCar.container_id && getContainerSlotInfo(newCar.container_id).isFull
+                        )
+                      }
+                    >
                       {submitting ? 'جاري الحفظ والاحتساب...' : 'حفظ السيارة'}
                     </Button>
                     <Button type="button" variant="outline" onClick={() => {

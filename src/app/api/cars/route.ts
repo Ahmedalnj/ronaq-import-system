@@ -1,4 +1,5 @@
 import { createServerSupabaseClient } from '@/lib/db/server';
+import { assertContainerHasCapacity } from '@/lib/containers/capacity';
 import { NextRequest, NextResponse } from 'next/server';
 import { carSchema } from '@/lib/validations/schemas';
 
@@ -46,6 +47,15 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json();
     const validatedData = carSchema.parse(body);
+
+    const capacityCheck = await assertContainerHasCapacity(
+      supabase,
+      user.id,
+      validatedData.container_id
+    );
+    if (!capacityCheck.ok) {
+      return NextResponse.json({ error: capacityCheck.error }, { status: 400 });
+    }
 
     // Calculate final cost
     const purchasePriceLYD =
@@ -106,6 +116,16 @@ export async function PUT(request: NextRequest) {
     }
 
     const validatedData = carSchema.parse(updateData);
+
+    const capacityCheck = await assertContainerHasCapacity(
+      supabase,
+      user.id,
+      validatedData.container_id,
+      id
+    );
+    if (!capacityCheck.ok) {
+      return NextResponse.json({ error: capacityCheck.error }, { status: 400 });
+    }
 
     // Calculate final cost
     const purchasePriceLYD =

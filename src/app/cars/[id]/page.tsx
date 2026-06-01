@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, use } from 'react';
+import { useEffect, useState, use, useCallback } from 'react';
+import { containerFullMessage } from '@/lib/containers/capacity';
 import { useAuth } from '@/hooks/use-auth';
 import { RtlLayout } from '@/components/shared/layout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -78,9 +79,11 @@ export default function CarDetailPage({ params }: { params: Promise<{ id: string
   interface Container {
     id: string;
     container_number?: string;
+    cars_count?: number;
   }
   const [trips, setTrips] = useState<Trip[]>([]);
   const [containers, setContainers] = useState<Container[]>([]);
+  const [containerUsage, setContainerUsage] = useState<Record<string, number>>({});
 
   // Full Details Edit State
   const [showFullEditForm, setShowFullEditForm] = useState(false);
@@ -115,18 +118,53 @@ export default function CarDetailPage({ params }: { params: Promise<{ id: string
           const tripsData = await tripsRes.json();
           setTrips(tripsData);
         }
-        const { data: containerData } = await supabase
-          .from('containers')
-          .select('id, container_number');
-        if (containerData) {
-          setContainers(containerData);
+        const containersRes = await fetch('/api/containers');
+        if (containersRes.ok) {
+          setContainers(await containersRes.json());
         }
+
+        const { data: carsInContainers } = await supabase
+          .from('cars')
+          .select('id, container_id')
+          .eq('user_id', user.id);
+
+        const usage: Record<string, number> = {};
+        for (const row of carsInContainers || []) {
+          if (!row.container_id || row.id === id) continue;
+          usage[row.container_id] = (usage[row.container_id] || 0) + 1;
+        }
+        setContainerUsage(usage);
       } catch (err) {
         console.error('Failed to load trips or containers:', err);
       }
     };
     fetchTripsAndContainers();
-  }, [user]);
+  }, [user, id]);
+
+  const getContainerSlotInfo = useCallback(
+    (containerId: string) => {
+      const container = containers.find((c) => c.id === containerId);
+      const capacity = Number(container?.cars_count) || 6;
+      const used = containerUsage[containerId] || 0;
+      return {
+        capacity,
+        used,
+        isFull: used >= capacity,
+        label: container?.container_number,
+      };
+    },
+    [containers, containerUsage]
+  );
+
+  const validateContainerAssignment = (containerId: string | undefined) => {
+    if (!containerId) return true;
+    const slot = getContainerSlotInfo(containerId);
+    if (slot.isFull) {
+      setError(containerFullMessage(slot.label || containerId.substring(0, 8), slot.capacity));
+      return false;
+    }
+    return true;
+  };
 
   // Start Edit Mode Handler (Pre-fills state with current car details)
   const startFullEditMode = () => {
@@ -218,6 +256,11 @@ export default function CarDetailPage({ params }: { params: Promise<{ id: string
     setSuccess('');
 
     try {
+      if (!validateContainerAssignment(editingCar.container_id || undefined)) {
+        setLoading(false);
+        return;
+      }
+
       const response = await fetch('/api/cars', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -421,6 +464,11 @@ export default function CarDetailPage({ params }: { params: Promise<{ id: string
     setSuccess('');
 
     try {
+      if (!validateContainerAssignment(car.container_id)) {
+        setLoading(false);
+        return;
+      }
+
       const sellPriceNum = sellingPrice ? parseFloat(sellingPrice) : undefined;
 
       const response = await fetch('/api/cars', {
@@ -1035,12 +1083,34 @@ export default function CarDetailPage({ params }: { params: Promise<{ id: string
                       onChange={(e) => setEditingCar({ ...editingCar, container_id: e.target.value })}
                     >
                       <option value="">لا يوجد حاوية</option>
-                      {containers.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.container_number || c.id.substring(0, 8)}
-                        </option>
-                      ))}
+                      {containers.map((c) => {
+                        const capacity = Number(c.cars_count) || 6;
+                        const used = containerUsage[c.id] || 0;
+                        const isFull = used >= capacity;
+                        const isCurrent = car?.container_id === c.id;
+                        return (
+                          <option key={c.id} value={c.id} disabled={isFull && !isCurrent}>
+                            {c.container_number || c.id.substring(0, 8)} ({used}/{capacity} سيارات)
+                            {isFull && !isCurrent ? ' — ممتلئة' : ''}
+                          </option>
+                        );
+                      })}
                     </select>
+                    {editingCar.container_id && (() => {
+                      const slot = getContainerSlotInfo(editingCar.container_id);
+                      if (slot.isFull && car?.container_id !== editingCar.container_id) {
+                        return (
+                          <p className="text-xs text-red-600 mt-1 font-semibold">
+                            {containerFullMessage(slot.label || '', slot.capacity)}
+                          </p>
+                        );
+                      }
+                      return (
+                        <p className="text-xs text-slate-500 mt-1">
+                          متبقي: {Math.max(0, slot.capacity - slot.used)} من {slot.capacity} سيارات
+                        </p>
+                      );
+                    })()}
                   </label>
                 </div>
 
@@ -1118,7 +1188,17 @@ export default function CarDetailPage({ params }: { params: Promise<{ id: string
                 )}
 
                 <div className="flex gap-3 pt-4 border-t border-slate-100 dark:border-slate-800">
-                  <Button type="submit" className="flex-1 bg-[#0A7C6E] hover:bg-[#086156]">
+                  <Button
+                    type="submit"
+                    className="flex-1 bg-[#0A7C6E] hover:bg-[#086156]"
+                    disabled={
+                      Boolean(
+                        editingCar.container_id &&
+                          getContainerSlotInfo(editingCar.container_id).isFull &&
+                          car?.container_id !== editingCar.container_id
+                      )
+                    }
+                  >
                     حفظ التغييرات
                   </Button>
                   <Button type="button" variant="outline" onClick={() => setShowFullEditForm(false)}>
