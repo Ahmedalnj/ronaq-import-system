@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import Link from 'next/link';
+import { confirmDelete, getErrorMessage, notify } from '@/lib/notify';
 import { Loader, Plus, Ship, Package, Trash2, Edit, DollarSign, RefreshCw, X, Car, Receipt, Eye } from 'lucide-react';
 
 interface Trip {
@@ -80,8 +81,6 @@ export default function ContainersPage() {
   const [trips, setTrips] = useState<Trip[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
 
   // Exchange rate for previewing overall container costs in LYD on the client side
   const [customRate, setCustomRate] = useState(6.50);
@@ -112,8 +111,8 @@ export default function ContainersPage() {
       if (!response.ok) throw new Error('فشل في جلب قائمة الحاويات');
       const data = await response.json();
       setContainers(data);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      notify.error(getErrorMessage(err));
     }
   };
 
@@ -139,8 +138,6 @@ export default function ContainersPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
-    setError('');
-    setSuccess('');
 
     try {
       if (!formData.trip_id) {
@@ -172,7 +169,7 @@ export default function ContainersPage() {
         throw new Error(errData.error || 'فشل في حفظ الحاوية');
       }
 
-      setSuccess(editingContainer ? 'تم تحديث الحاوية بنجاح!' : 'تم إضافة الحاوية الجديدة والعمليات المالية تلقائياً بنجاح!');
+      notify.success(editingContainer ? 'تم تحديث الحاوية بنجاح!' : 'تم إضافة الحاوية الجديدة والعمليات المالية تلقائياً بنجاح!');
       setShowAddForm(false);
       setEditingContainer(null);
       setFormData({
@@ -188,8 +185,8 @@ export default function ContainersPage() {
         cars_count: 6,
       });
       fetchContainers();
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      notify.error(getErrorMessage(err));
     } finally {
       setSubmitting(false);
     }
@@ -199,7 +196,6 @@ export default function ContainersPage() {
     setDetailOpen(true);
     setDetailLoading(true);
     setContainerDetails(null);
-    setError('');
 
     try {
       const response = await fetch(`/api/containers/${container.id}`);
@@ -210,7 +206,7 @@ export default function ContainersPage() {
       const data = await response.json();
       setContainerDetails(data);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'فشل في جلب تفاصيل الحاوية');
+      notify.error(getErrorMessage(err, 'فشل في جلب تفاصيل الحاوية'));
       setDetailOpen(false);
     } finally {
       setDetailLoading(false);
@@ -278,22 +274,18 @@ export default function ContainersPage() {
 
   const handleDelete = async (id: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    if (!confirm('هل أنت متأكد من رغبتك في حذف هذه الحاوية؟ سيؤدي ذلك لحذف المصاريف والبيانات المالية المرتبطة بها.')) return;
-    setError('');
-    setSuccess('');
-
-    try {
-      const response = await fetch(`/api/containers?id=${id}`, {
-        method: 'DELETE',
-      });
-
-      if (!response.ok) throw new Error('فشل في حذف الحاوية');
-
-      setSuccess('تم حذف الحاوية بنجاح!');
-      fetchContainers();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    await confirmDelete(
+      'حذف هذه الحاوية؟',
+      async () => {
+        const response = await fetch(`/api/containers?id=${id}`, { method: 'DELETE' });
+        if (!response.ok) throw new Error('فشل في حذف الحاوية');
+        await fetchContainers();
+      },
+      {
+        description: 'سيؤدي ذلك لحذف المصاريف والبيانات المالية المرتبطة بها.',
+        successMessage: 'تم حذف الحاوية بنجاح!',
+      }
+    );
   };
 
   const lydFormat = (val: number) => {
@@ -384,9 +376,6 @@ export default function ContainersPage() {
             </Button>
           </div>
         </div>
-
-        {error && <div className="bg-red-50 text-red-600 p-4 rounded-lg">{error}</div>}
-        {success && <div className="bg-green-50 text-green-600 p-4 rounded-lg">{success}</div>}
 
         {/* Dashboard Metrics for Containers */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6">

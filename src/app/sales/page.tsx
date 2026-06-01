@@ -6,6 +6,7 @@ import { RtlLayout } from '@/components/shared/layout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { confirmDelete, getErrorMessage, notify } from '@/lib/notify';
 import { Loader, Plus, Printer, CheckCircle, TrendingUp, AlertTriangle, Trash2 } from 'lucide-react';
 
 interface Sale {
@@ -44,8 +45,6 @@ export default function SalesPage() {
   const [cars, setCars] = useState<Car[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
 
   // Form State
   const [showAddForm, setShowAddForm] = useState(false);
@@ -75,8 +74,8 @@ export default function SalesPage() {
         const carsData = await carsRes.json();
         setCars(carsData);
       }
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      notify.error(getErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -91,8 +90,6 @@ export default function SalesPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
-    setError('');
-    setSuccess('');
 
     try {
       const priceNum = Number(newSale.selling_price);
@@ -119,7 +116,7 @@ export default function SalesPage() {
         throw new Error(errData.error || 'فشل في تسجيل فاتورة البيع');
       }
 
-      setSuccess('تم تسجيل عملية بيع السيارة وإصدار الفاتورة وتوزيع الأرباح والعمولات بنجاح!');
+      notify.success('تم تسجيل عملية بيع السيارة وإصدار الفاتورة وتوزيع الأرباح والعمولات بنجاح!');
       setShowAddForm(false);
       setNewSale({
         car_id: '',
@@ -132,33 +129,29 @@ export default function SalesPage() {
         notes: '',
       });
       fetchSalesAndCars();
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      notify.error(getErrorMessage(err));
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleDeleteSale = async (id: string) => {
-    if (!confirm('هل أنت متأكد من رغبتك في إلغاء عملية البيع هذه؟ سيتم إرجاع حالة السيارة كـ "متاحة" وحذف الأقساط المرتبطة بها تلقائياً.')) return;
-    setError('');
-    setSuccess('');
-
-    try {
-      const response = await fetch(`/api/sales?id=${id}`, {
-        method: 'DELETE',
-      });
-
-      if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.error || 'فشل في إلغاء عملية البيع');
+    await confirmDelete(
+      'إلغاء عملية البيع هذه؟',
+      async () => {
+        const response = await fetch(`/api/sales?id=${id}`, { method: 'DELETE' });
+        if (!response.ok) {
+          const errData = await response.json();
+          throw new Error(errData.error || 'فشل في إلغاء عملية البيع');
+        }
+        await fetchSalesAndCars();
+      },
+      {
+        description: 'سيتم إرجاع السيارة كـ «متاحة» وحذف الأقساط المرتبطة تلقائياً.',
+        successMessage: 'تم إلغاء عملية البيع وإرجاع السيارة للمخزون!',
       }
-
-      setSuccess('تم إلغاء عملية البيع بنجاح وإرجاع السيارة للمخزون المتاح!');
-      fetchSalesAndCars();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    );
   };
 
   const getPaymentTypeLabel = (type: string) => {
@@ -273,9 +266,6 @@ export default function SalesPage() {
             تسجيل مبيعة جديدة
           </Button>
         </div>
-
-        {error && <div className="bg-red-50 text-red-600 p-4 rounded-lg">{error}</div>}
-        {success && <div className="bg-green-50 text-green-600 p-4 rounded-lg">{success}</div>}
 
         {/* Dashboard Metrics for Sales */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

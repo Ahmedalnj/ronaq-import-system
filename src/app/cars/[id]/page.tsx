@@ -11,6 +11,7 @@ import { CAR_EXPENSE_LABELS, CAR_EXPENSE_TYPES } from '@/lib/cars/car-expenses';
 import { Loader, ArrowRight, Upload, Trash2, Maximize2, X, ChevronLeft, ChevronRight, DollarSign, ShieldAlert, Award, Pencil, CheckCircle, Plus, Receipt, Wrench } from 'lucide-react';
 import Link from 'next/link';
 import { createClient } from '@/lib/db/client';
+import { confirmDelete, getErrorMessage, notify } from '@/lib/notify';
 
 interface Car {
   id: string;
@@ -49,9 +50,7 @@ export default function CarDetailPage({ params }: { params: Promise<{ id: string
   const [car, setCar] = useState<Car | null>(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
-  
+
   // Lightbox and Gallery States
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [lightboxOpen, setLightboxOpen] = useState(false);
@@ -200,7 +199,7 @@ export default function CarDetailPage({ params }: { params: Promise<{ id: string
     if (!containerId) return true;
     const slot = getContainerSlotInfo(containerId);
     if (slot.isFull) {
-      setError(containerFullMessage(slot.label || containerId.substring(0, 8), slot.capacity));
+      notify.error(containerFullMessage(slot.label || containerId.substring(0, 8), slot.capacity));
       return false;
     }
     return true;
@@ -263,9 +262,6 @@ export default function CarDetailPage({ params }: { params: Promise<{ id: string
   const handleDeleteCar = async () => {
     if (!car) return;
     setDeleting(true);
-    setError('');
-    setSuccess('');
-
     try {
       const response = await fetch(`/api/cars?id=${car.id}`, {
         method: 'DELETE',
@@ -276,12 +272,12 @@ export default function CarDetailPage({ params }: { params: Promise<{ id: string
         throw new Error(errData.error || 'فشل في حذف السيارة');
       }
 
-      setSuccess('تم حذف السيارة بنجاح! جاري تحويلك للمخزون...');
+      notify.success('تم حذف السيارة بنجاح! جاري تحويلك للمخزون...');
       setTimeout(() => {
         window.location.href = '/cars';
       }, 1500);
-    } catch (err: any) {
-      setError(err.message || 'فشل حذف السيارة');
+    } catch (err: unknown) {
+      notify.error(getErrorMessage(err, 'فشل حذف السيارة'));
       setDeleting(false);
       setDeleteConfirm(false);
     }
@@ -292,9 +288,6 @@ export default function CarDetailPage({ params }: { params: Promise<{ id: string
     e.preventDefault();
     if (!car) return;
     setLoading(true);
-    setError('');
-    setSuccess('');
-
     try {
       if (!validateContainerAssignment(editingCar.container_id || undefined)) {
         setLoading(false);
@@ -325,10 +318,10 @@ export default function CarDetailPage({ params }: { params: Promise<{ id: string
       // Reload data to show updated calculations
       const updatedCar = await response.json();
       setCar(updatedCar);
-      setSuccess('تم تحديث كامل بيانات السيارة بنجاح وإعادة احتساب تكلفة الهبوط!');
+      notify.success('تم تحديث كامل بيانات السيارة بنجاح وإعادة احتساب تكلفة الهبوط!');
       setShowFullEditForm(false);
     } catch (err: any) {
-      setError(err.message || 'حدث خطأ أثناء تعديل البيانات');
+      notify.error(err.message || 'حدث خطأ أثناء تعديل البيانات');
     } finally {
       setLoading(false);
     }
@@ -366,7 +359,7 @@ export default function CarDetailPage({ params }: { params: Promise<{ id: string
           setContainerExpenses([]);
         }
       } catch (err: any) {
-        setError(err.message);
+        notify.error(err.message);
       } finally {
         setLoading(false);
       }
@@ -405,9 +398,6 @@ export default function CarDetailPage({ params }: { params: Promise<{ id: string
   const handleCarExpenseSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setCarExpenseSubmitting(true);
-    setError('');
-    setSuccess('');
-
     try {
       const amountNum = Number(newCarExpense.amount);
       const paidNum = Number(newCarExpense.paid_amount);
@@ -442,7 +432,7 @@ export default function CarDetailPage({ params }: { params: Promise<{ id: string
       const result = await response.json();
       if (result.car) setCar(result.car);
       setCarExpenses((prev) => [result.expense, ...prev]);
-      setSuccess('تم تسجيل مصروف السيارة وتحديث التكلفة النهائية.');
+      notify.success('تم تسجيل مصروف السيارة وتحديث التكلفة النهائية.');
       setShowCarExpenseForm(false);
       setNewCarExpense({
         expense_type: 'repair',
@@ -454,35 +444,34 @@ export default function CarDetailPage({ params }: { params: Promise<{ id: string
         exchange_rate: '',
       });
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'حدث خطأ');
+      notify.error(err instanceof Error ? err.message : 'حدث خطأ');
     } finally {
       setCarExpenseSubmitting(false);
     }
   };
 
   const handleDeleteCarExpense = async (expenseId: string) => {
-    if (!window.confirm('حذف هذا المصروف؟ سيتم إعادة احتساب تكلفة السيارة.')) return;
-    setError('');
-    try {
-      const response = await fetch(`/api/expenses?id=${expenseId}`, { method: 'DELETE' });
-      if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.error || 'فشل الحذف');
+    await confirmDelete(
+      'حذف هذا المصروف؟',
+      async () => {
+        const response = await fetch(`/api/expenses?id=${expenseId}`, { method: 'DELETE' });
+        if (!response.ok) {
+          const errData = await response.json();
+          throw new Error(errData.error || 'فشل الحذف');
+        }
+        await refreshCarAndExpenses();
+      },
+      {
+        description: 'سيتم إعادة احتساب تكلفة السيارة.',
+        successMessage: 'تم حذف المصروف وتحديث التكلفة.',
       }
-      setSuccess('تم حذف المصروف وتحديث التكلفة.');
-      await refreshCarAndExpenses();
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'حدث خطأ');
-    }
+    );
   };
 
   // Image Upload Handler to Supabase Storage
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0 || !car) return;
     setUploading(true);
-    setError('');
-    setSuccess('');
-
     try {
       const urls: string[] = [];
       for (let i = 0; i < e.target.files.length; i++) {
@@ -525,9 +514,9 @@ export default function CarDetailPage({ params }: { params: Promise<{ id: string
       if (dbError) throw dbError;
 
       setCar({ ...car, image_urls: updatedUrls });
-      setSuccess('تم رفع الصور وإضافتها للمعرض بنجاح!');
+      notify.success('تم رفع الصور وإضافتها للمعرض بنجاح!');
     } catch (err: any) {
-      setError(err.message || 'حدث خطأ أثناء رفع الصور');
+      notify.error(err.message || 'حدث خطأ أثناء رفع الصور');
     } finally {
       setUploading(false);
     }
@@ -536,9 +525,6 @@ export default function CarDetailPage({ params }: { params: Promise<{ id: string
   // Delete Image Handler
   const handleDeleteImage = async (indexToDelete: number) => {
     if (!car) return;
-    setError('');
-    setSuccess('');
-
     try {
       const urlToRemove = car.image_urls[indexToDelete];
       const updatedUrls = car.image_urls.filter((_, idx) => idx !== indexToDelete);
@@ -565,9 +551,9 @@ export default function CarDetailPage({ params }: { params: Promise<{ id: string
       if (activeImageIndex >= updatedUrls.length && updatedUrls.length > 0) {
         setActiveImageIndex(updatedUrls.length - 1);
       }
-      setSuccess('تم حذف الصورة بنجاح!');
+      notify.success('تم حذف الصورة بنجاح!');
     } catch (err: any) {
-      setError(err.message || 'فشل حذف الصورة');
+      notify.error(err.message || 'فشل حذف الصورة');
     }
   };
 
@@ -595,7 +581,7 @@ export default function CarDetailPage({ params }: { params: Promise<{ id: string
       setCar({ ...car, image_urls: newUrls });
       setActiveImageIndex(targetIndex);
     } catch (err: any) {
-      setError(err.message || 'فشل إعادة ترتيب الصور');
+      notify.error(err.message || 'فشل إعادة ترتيب الصور');
     }
   };
 
@@ -603,9 +589,6 @@ export default function CarDetailPage({ params }: { params: Promise<{ id: string
   const handleUpdateDetails = async () => {
     if (!car) return;
     setLoading(true);
-    setError('');
-    setSuccess('');
-
     try {
       if (!validateContainerAssignment(car.container_id)) {
         setLoading(false);
@@ -644,10 +627,10 @@ export default function CarDetailPage({ params }: { params: Promise<{ id: string
 
       const updated = await response.json();
       setCar(updated);
-      setSuccess('تم تحديث البيانات المالية والحالة بنجاح!');
+      notify.success('تم تحديث البيانات المالية والحالة بنجاح!');
       setEditMode(false);
     } catch (err: any) {
-      setError(err.message || 'فشل تحديث البيانات');
+      notify.error(err.message || 'فشل تحديث البيانات');
     } finally {
       setLoading(false);
     }
@@ -663,20 +646,18 @@ export default function CarDetailPage({ params }: { params: Promise<{ id: string
     );
   }
 
-  if (error && !car) {
+  if (!car) {
     return (
       <RtlLayout>
-        <div className="p-8 space-y-4">
-          <div className="bg-red-50 text-red-600 p-4 rounded-lg text-center">{error}</div>
-          <Link href="/cars" className="flex items-center gap-2 text-[#0A7C6E] hover:underline">
+        <div className="p-8 space-y-4 text-center">
+          <p className="text-slate-600">تعذّر تحميل بيانات السيارة أو أنها غير موجودة.</p>
+          <Link href="/cars" className="inline-flex items-center gap-2 text-[#0A7C6E] hover:underline">
             <ArrowRight size={20} /> العودة إلى قائمة السيارات
           </Link>
         </div>
       </RtlLayout>
     );
   }
-
-  if (!car) return null;
 
   const currentImages = car.image_urls && car.image_urls.length > 0
     ? car.image_urls
@@ -715,9 +696,6 @@ export default function CarDetailPage({ params }: { params: Promise<{ id: string
             </Link>
           </div>
         </div>
-
-        {error && <div className="bg-red-50 text-red-600 p-4 rounded-lg">{error}</div>}
-        {success && <div className="bg-green-50 text-green-600 p-4 rounded-lg">{success}</div>}
 
         {/* Gallery & Quick Overview Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">

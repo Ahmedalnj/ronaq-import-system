@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Loader, Plus, Search, Filter, ShieldAlert, Award, FileDown, Check } from 'lucide-react';
 import Link from 'next/link';
 import { createClient } from '@/lib/db/client';
+import { getErrorMessage, notify } from '@/lib/notify';
 
 interface Trip {
   id: string;
@@ -57,8 +58,6 @@ export default function CarsPage() {
   const [containers, setContainers] = useState<Container[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
   const [imageUploading, setImageUploading] = useState(false);
   const [imagePreview, setImagePreview] = useState('');
 
@@ -68,13 +67,11 @@ export default function CarsPage() {
     
     // Basic image checks
     if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
-      setError('صيغة الملف غير مدعومة. يرجى رفع صور بصيغة JPG, PNG, WEBP فقط');
+      notify.error('صيغة الملف غير مدعومة. يرجى رفع صور بصيغة JPG, PNG, WEBP فقط');
       return;
     }
 
     setImageUploading(true);
-    setError('');
-    setSuccess('');
 
     try {
       const fileExt = file.name.split('.').pop();
@@ -99,10 +96,10 @@ export default function CarsPage() {
 
       setNewCar(prev => ({ ...prev, image_url: publicUrl }));
       setImagePreview(publicUrl);
-      setSuccess('تم رفع صورة السيارة بنجاح!');
-    } catch (err: any) {
+      notify.success('تم رفع صورة السيارة بنجاح!');
+    } catch (err: unknown) {
       console.error(err);
-      setError(err.message || 'حدث خطأ أثناء رفع الصورة');
+      notify.error(getErrorMessage(err, 'حدث خطأ أثناء رفع الصورة'));
     } finally {
       setImageUploading(false);
     }
@@ -204,8 +201,8 @@ export default function CarsPage() {
           const tripsData = await tripsRes.json();
           setTrips(tripsData);
         }
-      } catch (err: any) {
-        setError(err.message);
+      } catch (err: unknown) {
+        notify.error(getErrorMessage(err));
       } finally {
         setLoading(false);
       }
@@ -250,8 +247,6 @@ export default function CarsPage() {
   const handleAddCarSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
-    setError('');
-    setSuccess('');
 
     try {
       if (newCar.purchase_mode === 'import' && newCar.container_id) {
@@ -302,12 +297,12 @@ export default function CarsPage() {
 
       const addedCar = await response.json();
       setCars([addedCar, ...cars]);
-      setSuccess('تم إضافة السيارة الجديدة بنجاح! سيتم حساب تكاليفها تلقائياً.');
+      notify.success('تم إضافة السيارة الجديدة بنجاح! سيتم حساب تكاليفها تلقائياً.');
       setShowAddForm(false);
       setImagePreview('');
       setNewCar(defaultNewCar());
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      notify.error(getErrorMessage(err));
     } finally {
       setSubmitting(false);
     }
@@ -389,9 +384,6 @@ export default function CarsPage() {
             إضافة سيارة جديدة
           </Button>
         </div>
-
-        {error && <div className="bg-red-50 text-red-600 p-4 rounded-lg">{error}</div>}
-        {success && <div className="bg-green-50 text-green-600 p-4 rounded-lg">{success}</div>}
 
         {/* Add Car Dialog Modal */}
         {showAddForm && (

@@ -10,6 +10,7 @@ import {
   ProfitTrendChart,
 } from '@/components/dashboard/dashboard-charts';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { notify } from '@/lib/notify';
 
 interface DashboardMetrics {
   totalCapital: number;
@@ -48,7 +49,10 @@ export default function DashboardPage() {
         if (active) setMetrics(data);
       } catch (err) {
         console.error('Error fetching metrics:', err);
-        if (active) setError(true);
+        if (active) {
+          setError(true);
+          notify.error('فشل في تحميل بيانات لوحة التحكم');
+        }
       }
     })();
 

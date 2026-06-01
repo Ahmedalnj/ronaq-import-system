@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/hooks/use-auth';
+import { getErrorMessage, notify } from '@/lib/notify';
 import { RtlLayout } from '@/components/shared/layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Loader, TrendingUp, DollarSign, Activity, AlertTriangle, CheckCircle2, Landmark, Scale, Briefcase, ShieldAlert } from 'lucide-react';
@@ -59,7 +60,6 @@ export default function ReportsPage() {
   const { user, loading: authLoading } = useAuth();
   const [data, setData] = useState<ReportsData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
 
   useEffect(() => {
     if (!user) return;
@@ -70,8 +70,8 @@ export default function ReportsPage() {
         if (!response.ok) throw new Error('فشل في تحميل التقارير المحاسبية');
         const reportData = await response.json();
         setData(reportData);
-      } catch (err: any) {
-        setError(err.message);
+      } catch (err: unknown) {
+        notify.error(getErrorMessage(err));
       } finally {
         setLoading(false);
       }
@@ -97,14 +97,14 @@ export default function ReportsPage() {
     );
   }
 
-  if (error || !data) {
+  if (!data) {
     return (
       <RtlLayout>
         <div className="p-8">
           <div className="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 p-6 rounded-lg text-center space-y-2">
             <AlertTriangle className="w-12 h-12 mx-auto" />
             <h2 className="text-xl font-bold">حدث خطأ في جلب تقارير التكلفة</h2>
-            <p>{error || 'يرجى التأكد من اتصال قاعدة البيانات والمحاولة مجدداً.'}</p>
+            <p>يرجى التأكد من اتصال قاعدة البيانات والمحاولة مجدداً.</p>
           </div>
         </div>
       </RtlLayout>

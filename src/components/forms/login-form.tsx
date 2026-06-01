@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
+import { getErrorMessage, notify } from '@/lib/notify';
 import { signIn } from '@/hooks/use-auth';
 import { useRouter, useSearchParams } from 'next/navigation';
 
@@ -15,19 +16,19 @@ export function LoginForm() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
   const suspended = searchParams.get('suspended') === 'true';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setError('');
 
     try {
       await signIn(username, password);
       router.push('/dashboard');
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'فشل تسجيل الدخول. يرجى التحقق من اسم المستخدم وكلمة المرور.');
+      notify.error(
+        getErrorMessage(err, 'فشل تسجيل الدخول. يرجى التحقق من اسم المستخدم وكلمة المرور.')
+      );
     } finally {
       setLoading(false);
     }
@@ -43,11 +44,6 @@ export function LoginForm() {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
-            {error && (
-              <div className="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 p-3 rounded-md text-sm">
-                {error}
-              </div>
-            )}
             {suspended && (
               <div className="bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 p-3 rounded-md text-sm text-center font-bold">
                 🔒 تم تجميد هذا الحساب من قبل الإدارة. يرجى التواصل مع المسؤول.

@@ -6,6 +6,7 @@ import { RtlLayout } from '@/components/shared/layout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { confirmDelete, getErrorMessage, notify } from '@/lib/notify';
 import { Loader, Plus, Ship, Activity, DollarSign, Calendar, Edit, Trash2 } from 'lucide-react';
 
 interface Trip {
@@ -27,8 +28,6 @@ export default function TripsPage() {
   const [trips, setTrips] = useState<Trip[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
 
   // Form State
   const [showAddForm, setShowAddForm] = useState(false);
@@ -48,8 +47,8 @@ export default function TripsPage() {
       if (!response.ok) throw new Error('فشل في جلب قائمة الرحلات');
       const data = await response.json();
       setTrips(data);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      notify.error(getErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -64,8 +63,6 @@ export default function TripsPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
-    setError('');
-    setSuccess('');
 
     try {
       const url = '/api/trips';
@@ -89,7 +86,7 @@ export default function TripsPage() {
         throw new Error(errData.error || 'فشل في حفظ الرحلة الجديدة');
       }
 
-      setSuccess(editingTrip ? 'تم تحديث الرحلة بنجاح!' : 'تم إضافة الرحلة الجديدة بنجاح!');
+      notify.success(editingTrip ? 'تم تحديث الرحلة بنجاح!' : 'تم إضافة الرحلة الجديدة بنجاح!');
       setShowAddForm(false);
       setEditingTrip(null);
       setNewTrip({
@@ -101,8 +98,8 @@ export default function TripsPage() {
         status: 'open',
       });
       fetchTrips();
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      notify.error(getErrorMessage(err));
     } finally {
       setSubmitting(false);
     }
@@ -122,22 +119,18 @@ export default function TripsPage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('هل أنت متأكد من رغبتك في حذف هذه الرحلة نهائياً؟ سيؤدي ذلك لحذف الحاويات والعمليات المالية والسيارات المرتبطة بها!')) return;
-    setError('');
-    setSuccess('');
-
-    try {
-      const response = await fetch(`/api/trips?id=${id}`, {
-        method: 'DELETE',
-      });
-
-      if (!response.ok) throw new Error('فشل في حذف الرحلة');
-
-      setSuccess('تم حذف الرحلة بنجاح!');
-      fetchTrips();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    await confirmDelete(
+      'حذف هذه الرحلة نهائياً؟',
+      async () => {
+        const response = await fetch(`/api/trips?id=${id}`, { method: 'DELETE' });
+        if (!response.ok) throw new Error('فشل في حذف الرحلة');
+        await fetchTrips();
+      },
+      {
+        description: 'سيؤدي ذلك لحذف الحاويات والعمليات المالية والسيارات المرتبطة بها.',
+        successMessage: 'تم حذف الرحلة بنجاح!',
+      }
+    );
   };
 
   const usdFormat = (val: number) => {
@@ -175,9 +168,6 @@ export default function TripsPage() {
             إضافة رحلة جديدة
           </Button>
         </div>
-
-        {error && <div className="bg-red-50 text-red-600 p-4 rounded-lg">{error}</div>}
-        {success && <div className="bg-green-50 text-green-600 p-4 rounded-lg">{success}</div>}
 
         {/* Add Trip Modal Form */}
         {showAddForm && (

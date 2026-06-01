@@ -6,6 +6,7 @@ import { RtlLayout } from '@/components/shared/layout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Loader, AlertTriangle, CheckCircle, Calendar, Phone, Car } from 'lucide-react';
 import { createClient } from '@/lib/db/client';
+import { getErrorMessage, notify } from '@/lib/notify';
 
 interface Installment {
   id: string;
@@ -29,7 +30,6 @@ export default function InstallmentsPage() {
   const { user, loading: authLoading } = useAuth();
   const [installments, setInstallments] = useState<Installment[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
 
   const supabase = createClient();
 
@@ -45,8 +45,8 @@ export default function InstallmentsPage() {
 
         if (queryError) throw queryError;
         setInstallments(data as Installment[]);
-      } catch (err: any) {
-        setError(err.message || 'فشل في جلب الأقساط من قاعدة البيانات');
+      } catch (err: unknown) {
+        notify.error(getErrorMessage(err, 'فشل في جلب الأقساط من قاعدة البيانات'));
       } finally {
         setLoading(false);
       }
@@ -98,8 +98,6 @@ export default function InstallmentsPage() {
             مراقبة أقساط المشترين للسيارات المبيعة بالتقسيط وجدولة دفعاتها الشهرية ومراجعة المتأخرات
           </p>
         </div>
-
-        {error && <div className="bg-red-50 text-red-600 p-4 rounded-lg">{error}</div>}
 
         {/* Installment Cards */}
         {installments.length === 0 ? (

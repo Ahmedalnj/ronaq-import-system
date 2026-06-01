@@ -24,6 +24,7 @@ import {
   Trash2
 } from 'lucide-react';
 import type { User, UserRole } from '@/types';
+import { confirmDelete, notify } from '@/lib/notify';
 
 // Definition of all modules and their granular permissions
 const PERMISSIONS_LIST = [
@@ -107,8 +108,6 @@ export default function UsersManagementPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
   const [createForm, setCreateForm] = useState({
     name: '',
     username: '',
@@ -142,8 +141,7 @@ export default function UsersManagementPage() {
   const fetchUsers = async () => {
     try {
       setLoading(true);
-      setError('');
-      
+
       const response = await fetch('/api/users');
       if (!response.ok) {
         const errData = await response.json();
@@ -153,7 +151,7 @@ export default function UsersManagementPage() {
       const data = await response.json();
       setUsers(data);
     } catch (err: unknown) {
-      setError(getErrorMessage(err));
+      notify.error(getErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -170,7 +168,7 @@ export default function UsersManagementPage() {
   // Handle Instant Suspension Toggle
   const handleToggleStatus = async (user: User) => {
     if (user.id === currentAdmin?.id) {
-      setError('لا يمكنك تجميد حسابك الشخصي!');
+      notify.error('لا يمكنك تجميد حسابك الشخصي!');
       return;
     }
 
@@ -193,14 +191,10 @@ export default function UsersManagementPage() {
         throw new Error(errData.error || 'فشل تعديل حالة الحساب');
       }
 
-      setSuccess(`تم ${updatedStatus ? 'تفعيل' : 'تجميد'} حساب ${user.name} بنجاح!`);
-      // Update local state
+      notify.success(`تم ${updatedStatus ? 'تفعيل' : 'تجميد'} حساب ${user.name} بنجاح!`);
       setUsers(prev => prev.map(u => u.id === user.id ? { ...u, is_active: updatedStatus } : u));
-      
-      setTimeout(() => setSuccess(''), 3000);
     } catch (err: unknown) {
-      setError(getErrorMessage(err));
-      setTimeout(() => setError(''), 5000);
+      notify.error(getErrorMessage(err));
     }
   };
 
@@ -216,7 +210,6 @@ export default function UsersManagementPage() {
       is_active: user.is_active ?? true,
     });
     setEditModalOpen(true);
-    setError('');
   };
 
   // Pre-fill recommended permissions when role changes
@@ -264,8 +257,6 @@ export default function UsersManagementPage() {
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     setCreating(true);
-    setError('');
-    setSuccess('');
 
     try {
       const response = await fetch('/api/users', {
@@ -286,11 +277,9 @@ export default function UsersManagementPage() {
       const createdUser = await response.json();
       setUsers(prev => [createdUser, ...prev]);
       setCreateForm({ name: '', username: '', password: '', role: 'viewer' });
-      setSuccess(`تم إنشاء المستخدم ${createdUser.username || createdUser.name} بنجاح`);
-      setTimeout(() => setSuccess(''), 3000);
+      notify.success(`تم إنشاء المستخدم ${createdUser.username || createdUser.name} بنجاح`);
     } catch (err: unknown) {
-      setError(getErrorMessage(err));
-      setTimeout(() => setError(''), 5000);
+      notify.error(getErrorMessage(err));
     } finally {
       setCreating(false);
     }
@@ -317,7 +306,6 @@ export default function UsersManagementPage() {
     if (!selectedUser) return;
 
     setSubmitting(true);
-    setError('');
 
     try {
       const response = await fetch(`/api/users/${selectedUser.id}`, {
@@ -340,13 +328,11 @@ export default function UsersManagementPage() {
 
       const updatedUser = await response.json();
       setUsers(prev => prev.map(u => (u.id === updatedUser.id ? updatedUser : u)));
-      setSuccess(`تم تحديث ${updatedUser.name || updatedUser.username} بنجاح!`);
+      notify.success(`تم تحديث ${updatedUser.name || updatedUser.username} بنجاح!`);
       setEditModalOpen(false);
       fetchUsers();
-      
-      setTimeout(() => setSuccess(''), 3000);
     } catch (err: unknown) {
-      setError(getErrorMessage(err));
+      notify.error(getErrorMessage(err));
     } finally {
       setSubmitting(false);
     }
@@ -354,36 +340,28 @@ export default function UsersManagementPage() {
 
   const handleDeleteUser = async (user: User) => {
     if (user.id === currentAdmin?.id) {
-      setError('لا يمكنك حذف حسابك الشخصي!');
+      notify.error('لا يمكنك حذف حسابك الشخصي!');
       return;
     }
 
-    const confirmed = window.confirm(
-      `هل أنت متأكد من حذف المستخدم "${user.name || user.username}"؟\nلا يمكن التراجع عن هذا الإجراء.`
-    );
-    if (!confirmed) return;
-
     setDeletingId(user.id);
-    setError('');
-    setSuccess('');
-
-    try {
-      const response = await fetch(`/api/users/${user.id}`, { method: 'DELETE' });
-      if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.error || 'فشل حذف المستخدم');
+    await confirmDelete(
+      `حذف المستخدم "${user.name || user.username}"؟`,
+      async () => {
+        const response = await fetch(`/api/users/${user.id}`, { method: 'DELETE' });
+        if (!response.ok) {
+          const errData = await response.json();
+          throw new Error(errData.error || 'فشل حذف المستخدم');
+        }
+        setUsers(prev => prev.filter(u => u.id !== user.id));
+        if (selectedUser?.id === user.id) setEditModalOpen(false);
+      },
+      {
+        description: 'لا يمكن التراجع عن هذا الإجراء.',
+        successMessage: 'تم حذف المستخدم بنجاح',
       }
-
-      setUsers(prev => prev.filter(u => u.id !== user.id));
-      if (selectedUser?.id === user.id) setEditModalOpen(false);
-      setSuccess(`تم حذف المستخدم بنجاح`);
-      setTimeout(() => setSuccess(''), 3000);
-    } catch (err: unknown) {
-      setError(getErrorMessage(err));
-      setTimeout(() => setError(''), 5000);
-    } finally {
-      setDeletingId(null);
-    }
+    );
+    setDeletingId(null);
   };
 
   // Filter users based on search query
@@ -481,19 +459,6 @@ export default function UsersManagementPage() {
         </div>
 
         {/* Global Alerts */}
-        {error && (
-          <div className="bg-red-50 border-r-4 border-red-500 text-red-700 p-4 rounded-lg flex items-center gap-3 text-sm font-semibold">
-            <AlertTriangle className="w-5 h-5 flex-shrink-0" />
-            <span>{error}</span>
-          </div>
-        )}
-        {success && (
-          <div className="bg-green-50 border-r-4 border-green-500 text-green-700 p-4 rounded-lg flex items-center gap-3 text-sm font-semibold">
-            <Check className="w-5 h-5 flex-shrink-0" />
-            <span>{success}</span>
-          </div>
-        )}
-
         <Card className="border-slate-100 shadow-sm">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-lg text-slate-800">

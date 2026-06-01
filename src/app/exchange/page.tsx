@@ -6,6 +6,7 @@ import { RtlLayout } from '@/components/shared/layout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { confirmDelete, getErrorMessage, notify } from '@/lib/notify';
 import { Loader, Plus, RefreshCw, Trash2, Calendar, DollarSign, ArrowRight, Pencil } from 'lucide-react';
 
 interface Trip {
@@ -33,8 +34,6 @@ export default function ExchangePage() {
   const [trips, setTrips] = useState<Trip[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
 
   // Form State
   const [showAddForm, setShowAddForm] = useState(false);
@@ -53,8 +52,8 @@ export default function ExchangePage() {
       if (!response.ok) throw new Error('فشل في تحميل سجل الصرف');
       const data = await response.json();
       setTransactions(data);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      notify.error(getErrorMessage(err));
     }
   };
 
@@ -80,8 +79,6 @@ export default function ExchangePage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
-    setError('');
-    setSuccess('');
 
     try {
       if (!formData.trip_id) {
@@ -116,7 +113,7 @@ export default function ExchangePage() {
         throw new Error(errData.error || 'فشل في حفظ عملية الصرف');
       }
 
-      setSuccess(editingId ? 'تم تعديل عملية الصرف وتحديث رأس مال الرحلة تلقائياً بنجاح!' : 'تم إضافة عملية شراء الدولار وتحديث رأس مال الرحلة تلقائياً بنجاح!');
+      notify.success(editingId ? 'تم تعديل عملية الصرف وتحديث رأس مال الرحلة تلقائياً بنجاح!' : 'تم إضافة عملية شراء الدولار وتحديث رأس مال الرحلة تلقائياً بنجاح!');
       setShowAddForm(false);
       setEditingId(null);
       setFormData({
@@ -127,8 +124,8 @@ export default function ExchangePage() {
         date: new Date().toISOString().split('T')[0],
       });
       fetchTransactions();
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      notify.error(getErrorMessage(err));
     } finally {
       setSubmitting(false);
     }
@@ -147,22 +144,18 @@ export default function ExchangePage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('هل أنت متأكد من حذف هذه العملية؟ سيتم تخفيض رأس مال الرحلة المرتبطة تلقائياً.')) return;
-    setError('');
-    setSuccess('');
-
-    try {
-      const response = await fetch(`/api/exchange-transactions?id=${id}`, {
-        method: 'DELETE',
-      });
-
-      if (!response.ok) throw new Error('فشل في حذف العملية');
-
-      setSuccess('تم حذف عملية الصرف وتحديث الحسابات بنجاح!');
-      fetchTransactions();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    await confirmDelete(
+      'حذف عملية الصرف هذه؟',
+      async () => {
+        const response = await fetch(`/api/exchange-transactions?id=${id}`, { method: 'DELETE' });
+        if (!response.ok) throw new Error('فشل في حذف العملية');
+        await fetchTransactions();
+      },
+      {
+        description: 'سيتم تخفيض رأس مال الرحلة المرتبطة تلقائياً.',
+        successMessage: 'تم حذف عملية الصرف وتحديث الحسابات بنجاح!',
+      }
+    );
   };
 
   const lydFormat = (val: number) => {
@@ -205,9 +198,6 @@ export default function ExchangePage() {
             تسجيل عملية صرف جديدة
           </Button>
         </div>
-
-        {error && <div className="bg-red-50 text-red-600 p-4 rounded-lg">{error}</div>}
-        {success && <div className="bg-green-50 text-green-600 p-4 rounded-lg">{success}</div>}
 
         {/* Dashboard Metrics for Exchange */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

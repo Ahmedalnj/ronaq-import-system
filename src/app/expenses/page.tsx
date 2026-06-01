@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { CAR_EXPENSE_LABELS } from '@/lib/cars/car-expenses';
+import { confirmDelete, getErrorMessage, notify } from '@/lib/notify';
 import { Loader, Plus, DollarSign, Wallet, FileText, Edit, Trash2, Package, ChevronDown, ChevronUp, AlertCircle, CheckCircle2 } from 'lucide-react';
 
 interface Expense {
@@ -70,8 +71,6 @@ export default function ExpensesPage() {
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
 
   // Form State
   const [showAddForm, setShowAddForm] = useState(false);
@@ -108,8 +107,6 @@ export default function ExpensesPage() {
     e.preventDefault();
     if (!payingExpense) return;
     setSubmitting(true);
-    setError('');
-    setSuccess('');
 
     try {
       const paidNum = Number(payFormData.paid_amount);
@@ -148,12 +145,12 @@ export default function ExpensesPage() {
         throw new Error(errData.error || 'فشل في تحديث حالة السداد');
       }
 
-      setSuccess('تم تسجيل سداد الدفعة وتحديث التكاليف بنجاح!');
+      notify.success('تم تسجيل سداد الدفعة وتحديث التكاليف بنجاح!');
       setShowPayModal(false);
       setPayingExpense(null);
       fetchExpenses();
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      notify.error(getErrorMessage(err));
     } finally {
       setSubmitting(false);
     }
@@ -165,37 +162,31 @@ export default function ExpensesPage() {
       if (!response.ok) throw new Error('فشل في جلب قائمة المصاريف والنفقات');
       const data = await response.json();
       setExpenses(data);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      notify.error(getErrorMessage(err));
     } finally {
       setLoading(false);
     }
   };
 
   const handleDeleteExpense = async (id: string) => {
-    if (!window.confirm('هل أنت متأكد من رغبتك في حذف هذا المصروف نهائياً؟ سيتم حذف جميع الالتزامات المرتبطة به وإعادة احتساب تكاليف السيارات تلقائياً.')) {
-      return;
-    }
-    setLoading(true);
-    setError('');
-    setSuccess('');
-
-    try {
-      const response = await fetch(`/api/expenses?id=${id}`, {
-        method: 'DELETE',
-      });
-
-      if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.error || 'فشل في حذف المصروف');
+    await confirmDelete(
+      'حذف هذا المصروف نهائياً؟',
+      async () => {
+        setLoading(true);
+        const response = await fetch(`/api/expenses?id=${id}`, { method: 'DELETE' });
+        if (!response.ok) {
+          const errData = await response.json();
+          throw new Error(errData.error || 'فشل في حذف المصروف');
+        }
+        await fetchExpenses();
+      },
+      {
+        description: 'سيتم حذف الالتزامات المرتبطة وإعادة احتساب تكاليف السيارات تلقائياً.',
+        successMessage: 'تم حذف المصروف وإعادة احتساب التكاليف بنجاح!',
       }
-
-      setSuccess('تم حذف المصروف وإعادة احتساب التكاليف بنجاح!');
-      await fetchExpenses();
-    } catch (err: any) {
-      setError(err.message);
-      setLoading(false);
-    }
+    );
+    setLoading(false);
   };
 
   useEffect(() => {
@@ -228,8 +219,6 @@ export default function ExpensesPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
-    setError('');
-    setSuccess('');
 
     try {
       const amountNum = Number(newExpense.amount);
@@ -259,7 +248,7 @@ export default function ExpensesPage() {
         throw new Error(errData.error || 'فشل في تسجيل المصروف');
       }
 
-      setSuccess('تم تسجيل المصروف والنفقة بنجاح، وجرى تحديث حساب الالتزامات والمستحقات المتبقية.');
+      notify.success('تم تسجيل المصروف والنفقة بنجاح، وجرى تحديث حساب الالتزامات والمستحقات المتبقية.');
       setShowAddForm(false);
       setNewExpense({
         trip_id: '',
@@ -272,8 +261,8 @@ export default function ExpensesPage() {
         notes: '',
       });
       fetchExpenses();
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      notify.error(getErrorMessage(err));
     } finally {
       setSubmitting(false);
     }
@@ -409,9 +398,6 @@ export default function ExpensesPage() {
             تسجيل مصروف جديد
           </Button>
         </div>
-
-        {error && <div className="bg-red-50 text-red-600 p-4 rounded-lg">{error}</div>}
-        {success && <div className="bg-green-50 text-green-600 p-4 rounded-lg">{success}</div>}
 
         {/* Dashboard Liabilities Summary Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
