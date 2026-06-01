@@ -1,7 +1,6 @@
-import { createServerSupabaseClient } from '@/lib/db/server';
 import { createAdminClient } from '@/lib/db/admin';
+import { requireAdmin } from '@/lib/api/require-admin';
 import { emailToUsername, isValidUsername, usernameToInternalEmail } from '@/lib/auth/username';
-import type { UserRole } from '@/types';
 import { NextRequest, NextResponse } from 'next/server';
 
 type UserRow = {
@@ -52,30 +51,11 @@ function withUsernames(users: UserRow[]) {
 // GET all users (Admins only)
 export async function GET() {
   try {
-    const supabase = await createServerSupabaseClient();
+    const auth = await requireAdmin();
+    if ('error' in auth) return auth.error;
 
-    // 1. Verify user authentication
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    // 2. Verify user is an admin
-    const { data: profile, error: profileError } = await supabase
-      .from('users')
-      .select('*')
-      .eq('id', user.id)
-      .single();
-
-    if (profileError || !profile || profile.role !== 'admin') {
-      return NextResponse.json({ error: 'Forbidden - Admins only' }, { status: 403 });
-    }
-
-    // 3. Fetch all users from public.users
-    const { data: users, error: usersError } = await supabase
+    const admin = createAdminClient();
+    const { data: users, error: usersError } = await admin
       .from('users')
       .select('*')
       .order('created_at', { ascending: false });
@@ -85,37 +65,17 @@ export async function GET() {
     return NextResponse.json(withUsernames(users || []));
   } catch (error) {
     console.error('Error fetching users:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
-// POST to create a new username/password user (Admins only)
+// POST create user (Admins only)
 export async function POST(request: NextRequest) {
   let createdAuthUserId: string | null = null;
 
   try {
-    const supabase = await createServerSupabaseClient();
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const { data: profile, error: profileError } = await supabase
-      .from('users')
-      .select('*')
-      .eq('id', user.id)
-      .single();
-
-    if (profileError || !profile || profile.role !== 'admin') {
-      return NextResponse.json({ error: 'Forbidden - Admins only' }, { status: 403 });
-    }
+    const auth = await requireAdmin();
+    if ('error' in auth) return auth.error;
 
     const body = (await request.json()) as CreateUserBody;
     const username = String(body.username || '');
@@ -161,7 +121,6 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'اسم المستخدم موجود مسبقاً' }, { status: 409 });
       }
 
-      // Orphan profile (no auth account) — remove so we can recreate cleanly
       await admin.from('users').delete().eq('id', existingProfile.id);
     }
 
@@ -169,10 +128,7 @@ export async function POST(request: NextRequest) {
       email,
       password,
       email_confirm: true,
-      user_metadata: {
-        name,
-        username,
-      },
+      user_metadata: { name, username },
     });
 
     if (authError) {
@@ -198,7 +154,6 @@ export async function POST(request: NextRequest) {
       updated_at: new Date().toISOString(),
     };
 
-    // Upsert handles Supabase trigger that may auto-insert public.users on auth signup
     const { data: newUser, error: upsertError } = await admin
       .from('users')
       .upsert(profilePayload, { onConflict: 'id' })
@@ -208,10 +163,7 @@ export async function POST(request: NextRequest) {
     if (upsertError) throw upsertError;
 
     return NextResponse.json(
-      {
-        ...newUser,
-        username: emailToUsername(newUser.email),
-      },
+      { ...newUser, username: emailToUsername(newUser.email) },
       { status: 201 }
     );
   } catch (error: unknown) {
@@ -224,7 +176,6 @@ export async function POST(request: NextRequest) {
           .eq('id', createdAuthUserId)
           .maybeSingle();
 
-        // Only remove auth when no profile row exists (avoid orphan profiles with no login)
         if (!profile) {
           await admin.auth.admin.deleteUser(createdAuthUserId);
         }
@@ -236,79 +187,6 @@ export async function POST(request: NextRequest) {
     console.error('Error creating user:', error);
     return NextResponse.json(
       { error: getErrorMessage(error, 'Failed to create user') },
-      { status: 400 }
-    );
-  }
-}
-
-// PUT to update user role, permissions, and is_active (Admins only)
-export async function PUT(request: NextRequest) {
-  try {
-    const supabase = await createServerSupabaseClient();
-
-    // 1. Verify user authentication
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    // 2. Verify user is an admin
-    const { data: profile, error: profileError } = await supabase
-      .from('users')
-      .select('*')
-      .eq('id', user.id)
-      .single();
-
-    if (profileError || !profile || profile.role !== 'admin') {
-      return NextResponse.json({ error: 'Forbidden - Admins only' }, { status: 403 });
-    }
-
-    // 3. Parse request body
-    const body = (await request.json()) as {
-      id?: string;
-      role?: UserRole;
-      permissions?: string[];
-      is_active?: boolean;
-    };
-    const { id, role, permissions, is_active } = body;
-
-    if (!id) {
-      return NextResponse.json({ error: 'User ID is required' }, { status: 400 });
-    }
-
-    // 4. Safety validations
-    if (id === user.id) {
-      if (is_active === false) {
-        return NextResponse.json({ error: 'لا يمكنك تجميد حسابك الشخصي!' }, { status: 400 });
-      }
-      if (role !== 'admin') {
-        return NextResponse.json({ error: 'لا يمكنك تغيير دورك كمدير عام!' }, { status: 400 });
-      }
-    }
-
-    // 5. Update user in public.users
-    const { data: updatedUser, error: updateError } = await supabase
-      .from('users')
-      .update({
-        role,
-        permissions,
-        is_active,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (updateError) throw updateError;
-
-    return NextResponse.json(updatedUser);
-  } catch (error: unknown) {
-    console.error('Error updating user:', error);
-    return NextResponse.json(
-      { error: getErrorMessage(error, 'Failed to update user') },
       { status: 400 }
     );
   }

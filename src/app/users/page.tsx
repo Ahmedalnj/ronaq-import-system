@@ -20,7 +20,8 @@ import {
   Unlock,
   AlertTriangle,
   Search,
-  UserPlus
+  UserPlus,
+  Trash2
 } from 'lucide-react';
 import type { User, UserRole } from '@/types';
 
@@ -120,15 +121,22 @@ export default function UsersManagementPage() {
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [editForm, setEditForm] = useState<{
+    name: string;
+    username: string;
+    password: string;
     role: UserRole;
     permissions: string[];
     is_active: boolean;
   }>({
+    name: '',
+    username: '',
+    password: '',
     role: 'viewer',
     permissions: [],
-    is_active: true
+    is_active: true,
   });
   const [submitting, setSubmitting] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // Fetch Users
   const fetchUsers = async () => {
@@ -168,15 +176,16 @@ export default function UsersManagementPage() {
 
     try {
       const updatedStatus = !user.is_active;
-      const response = await fetch('/api/users', {
+      const response = await fetch(`/api/users/${user.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          id: user.id,
+          name: user.name,
+          username: user.username || user.email.split('@')[0],
           role: user.role,
           permissions: user.permissions || [],
-          is_active: updatedStatus
-        })
+          is_active: updatedStatus,
+        }),
       });
 
       if (!response.ok) {
@@ -199,9 +208,12 @@ export default function UsersManagementPage() {
   const openEditModal = (user: User) => {
     setSelectedUser(user);
     setEditForm({
+      name: user.name || '',
+      username: user.username || user.email.split('@')[0],
+      password: '',
       role: user.role,
       permissions: user.permissions || [],
-      is_active: user.is_active ?? true
+      is_active: user.is_active ?? true,
     });
     setEditModalOpen(true);
     setError('');
@@ -308,23 +320,27 @@ export default function UsersManagementPage() {
     setError('');
 
     try {
-      const response = await fetch('/api/users', {
+      const response = await fetch(`/api/users/${selectedUser.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          id: selectedUser.id,
+          name: editForm.name,
+          username: editForm.username,
+          password: editForm.password || undefined,
           role: editForm.role,
           permissions: editForm.permissions,
-          is_active: editForm.is_active
-        })
+          is_active: editForm.is_active,
+        }),
       });
 
       if (!response.ok) {
         const errData = await response.json();
-        throw new Error(errData.error || 'فشل حفظ الصلاحيات');
+        throw new Error(errData.error || 'فشل تحديث المستخدم');
       }
 
-      setSuccess(`تم تحديث صلاحيات ${selectedUser.name} بنجاح!`);
+      const updatedUser = await response.json();
+      setUsers(prev => prev.map(u => (u.id === updatedUser.id ? updatedUser : u)));
+      setSuccess(`تم تحديث ${updatedUser.name || updatedUser.username} بنجاح!`);
       setEditModalOpen(false);
       fetchUsers();
       
@@ -333,6 +349,40 @@ export default function UsersManagementPage() {
       setError(getErrorMessage(err));
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleDeleteUser = async (user: User) => {
+    if (user.id === currentAdmin?.id) {
+      setError('لا يمكنك حذف حسابك الشخصي!');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `هل أنت متأكد من حذف المستخدم "${user.name || user.username}"؟\nلا يمكن التراجع عن هذا الإجراء.`
+    );
+    if (!confirmed) return;
+
+    setDeletingId(user.id);
+    setError('');
+    setSuccess('');
+
+    try {
+      const response = await fetch(`/api/users/${user.id}`, { method: 'DELETE' });
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error || 'فشل حذف المستخدم');
+      }
+
+      setUsers(prev => prev.filter(u => u.id !== user.id));
+      if (selectedUser?.id === user.id) setEditModalOpen(false);
+      setSuccess(`تم حذف المستخدم بنجاح`);
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err: unknown) {
+      setError(getErrorMessage(err));
+      setTimeout(() => setError(''), 5000);
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -622,14 +672,24 @@ export default function UsersManagementPage() {
                         </td>
                         <td className="px-6 py-4 text-center">
                           <div className="flex items-center justify-center gap-2">
-                            <Button 
-                              size="sm" 
-                              variant="outline" 
+                            <Button
+                              size="sm"
+                              variant="outline"
                               className="text-[#0A7C6E] hover:bg-[#0A7C6E]/5 hover:text-[#0A7C6E] border-slate-200"
                               onClick={() => openEditModal(user)}
                             >
                               <Edit2 className="w-3.5 h-3.5 ml-1.5" />
-                              الصلاحيات
+                              تعديل
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-red-600 hover:bg-red-50 hover:text-red-700 border-red-100"
+                              disabled={isSelf || deletingId === user.id}
+                              onClick={() => handleDeleteUser(user)}
+                            >
+                              <Trash2 className="w-3.5 h-3.5 ml-1.5" />
+                              {deletingId === user.id ? '...' : 'حذف'}
                             </Button>
                           </div>
                         </td>
@@ -650,8 +710,8 @@ export default function UsersManagementPage() {
             {/* Modal Header */}
             <div className="p-6 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
               <div>
-                <h3 className="text-xl font-black text-slate-800">صلاحيات المستخدم: {selectedUser.name || 'مستخدم جديد'}</h3>
-                <p className="text-xs text-slate-500 mt-1">تحديد دور الموظف وحقوق قراءة وتعديل وحذف كل مورد في النظام.</p>
+                <h3 className="text-xl font-black text-slate-800">تعديل المستخدم: {selectedUser.name || 'مستخدم جديد'}</h3>
+                <p className="text-xs text-slate-500 mt-1">تعديل البيانات الأساسية، كلمة المرور، الدور، والصلاحيات.</p>
               </div>
               <button 
                 onClick={() => setEditModalOpen(false)}
@@ -663,6 +723,40 @@ export default function UsersManagementPage() {
 
             {/* Modal Body */}
             <form onSubmit={handleSaveUser} className="flex-1 overflow-auto p-6 space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-white rounded-xl border border-slate-100">
+                <div className="space-y-2">
+                  <Label htmlFor="edit-name" className="font-bold text-slate-700">اسم الموظف</Label>
+                  <Input
+                    id="edit-name"
+                    value={editForm.name}
+                    onChange={(e) => setEditForm(prev => ({ ...prev, name: e.target.value }))}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-username" className="font-bold text-slate-700">اسم المستخدم</Label>
+                  <Input
+                    id="edit-username"
+                    dir="ltr"
+                    value={editForm.username}
+                    onChange={(e) => setEditForm(prev => ({ ...prev, username: e.target.value }))}
+                    autoComplete="off"
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-password" className="font-bold text-slate-700">كلمة مرور جديدة</Label>
+                  <Input
+                    id="edit-password"
+                    type="password"
+                    value={editForm.password}
+                    onChange={(e) => setEditForm(prev => ({ ...prev, password: e.target.value }))}
+                    placeholder="اتركه فارغاً لعدم التغيير"
+                    autoComplete="new-password"
+                  />
+                </div>
+              </div>
+
               {/* Role Select & Active State */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-4 bg-slate-50 rounded-xl border border-slate-100">
                 <div className="space-y-2">
@@ -773,7 +867,7 @@ export default function UsersManagementPage() {
                 onClick={handleSaveUser}
                 disabled={submitting}
               >
-                {submitting ? 'جاري الحفظ...' : 'حفظ الصلاحيات'}
+                {submitting ? 'جاري الحفظ...' : 'حفظ التعديلات'}
               </Button>
             </div>
           </Card>
