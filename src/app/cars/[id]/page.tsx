@@ -34,8 +34,12 @@ interface Car {
   image_urls: string[];
   trip_id?: string;
   container_id?: string;
+  purchase_mode?: 'import' | 'local' | 'shared_container';
+  external_container_ref?: string;
   purchase_price_krw?: number;
   exchange_rate_usd_krw?: number;
+  link_fees_allocation?: number;
+  clearance_allocation?: number;
 }
 
 export default function CarDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -854,19 +858,36 @@ export default function CarDetailPage({ params }: { params: Promise<{ id: string
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
-              <div className="flex justify-between py-1 border-b border-slate-100 dark:border-slate-800">
-                <span className="text-slate-500">نصيب الشحن والربط واصل:</span>
-                <span className="font-semibold text-orange-600 text-left">
-                  <span className="block">+{moneyFormat(car.shipping_allocation, true)}</span>
-                  <span className="block text-[10px] text-slate-400 font-normal">
-                    المعادل: {moneyFormat(car.shipping_allocation * car.exchange_rate)}
+              {Number(car.shipping_allocation) > 0 && (
+                <div className="flex justify-between py-1 border-b border-slate-100 dark:border-slate-800">
+                  <span className="text-slate-500">شحن بحري ($):</span>
+                  <span className="font-semibold text-orange-600 text-left">
+                    <span className="block">+{moneyFormat(car.shipping_allocation, true)}</span>
+                    <span className="block text-[10px] text-slate-400 font-normal">
+                      ≈ {moneyFormat(car.shipping_allocation * car.exchange_rate)}
+                    </span>
                   </span>
-                </span>
-              </div>
+                </div>
+              )}
+              {Number(car.link_fees_allocation) > 0 && (
+                <div className="flex justify-between py-1 border-b border-slate-100 dark:border-slate-800">
+                  <span className="text-slate-500">رسوم ربط ($):</span>
+                  <span className="font-semibold text-orange-600 text-left">
+                    +{moneyFormat(car.link_fees_allocation!, true)} (≈{' '}
+                    {moneyFormat((car.link_fees_allocation || 0) * car.exchange_rate)})
+                  </span>
+                </div>
+              )}
               <div className="flex justify-between py-1 border-b border-slate-100 dark:border-slate-800">
-                <span className="text-slate-500">نصيب الرسوم الجمركية:</span>
+                <span className="text-slate-500">جمارك (د.ل):</span>
                 <span className="font-semibold text-blue-600">+{moneyFormat(car.customs_allocation)}</span>
               </div>
+              {Number(car.clearance_allocation) > 0 && (
+                <div className="flex justify-between py-1 border-b border-slate-100 dark:border-slate-800">
+                  <span className="text-slate-500">تخليص (د.ل):</span>
+                  <span className="font-semibold text-blue-600">+{moneyFormat(car.clearance_allocation!)}</span>
+                </div>
+              )}
               <div className="flex justify-between py-1 border-b border-slate-100 dark:border-slate-800">
                 <span className="text-slate-500">نصيب مصاريف الرحلة العامة:</span>
                 <span className="font-semibold text-purple-600">+{moneyFormat(car.expense_allocation)}</span>

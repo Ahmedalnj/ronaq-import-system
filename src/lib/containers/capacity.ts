@@ -9,9 +9,10 @@ export async function assertContainerHasCapacity(
   supabase: SupabaseClient,
   userId: string,
   containerId: string | null | undefined,
-  excludeCarId?: string
+  excludeCarId?: string,
+  options?: { skipCapacityCheck?: boolean }
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  if (!containerId) {
+  if (!containerId || options?.skipCapacityCheck) {
     return { ok: true };
   }
 

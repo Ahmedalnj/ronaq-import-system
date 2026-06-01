@@ -1,4 +1,5 @@
 import { createServerSupabaseClient } from '@/lib/db/server';
+import { computeCarFinancials } from '@/lib/cars/final-cost';
 import { assertContainerHasCapacity } from '@/lib/containers/capacity';
 import { NextRequest, NextResponse } from 'next/server';
 import { carSchema } from '@/lib/validations/schemas';
@@ -48,38 +49,39 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const validatedData = carSchema.parse(body);
 
+    const skipCapacity =
+      validatedData.purchase_mode === 'local' ||
+      validatedData.purchase_mode === 'shared_container';
+
     const capacityCheck = await assertContainerHasCapacity(
       supabase,
       user.id,
-      validatedData.container_id
+      validatedData.container_id,
+      undefined,
+      { skipCapacityCheck: skipCapacity }
     );
     if (!capacityCheck.ok) {
       return NextResponse.json({ error: capacityCheck.error }, { status: 400 });
     }
 
-    // Calculate final cost
-    const purchasePriceLYD =
-      validatedData.purchase_price_usd * validatedData.exchange_rate;
-    const final_cost =
-      purchasePriceLYD +
-      validatedData.shipping_allocation +
-      validatedData.customs_allocation +
-      validatedData.expense_allocation;
+    const financials = computeCarFinancials(validatedData);
 
-    // Calculate profit if selling price is provided
-    let profit = null;
-    if (validatedData.selling_price) {
-      profit = validatedData.selling_price - final_cost;
-    }
+    const tripId =
+      validatedData.purchase_mode === 'local' ? null : validatedData.trip_id ?? null;
+    const containerId =
+      validatedData.purchase_mode === 'local' ? null : validatedData.container_id ?? null;
 
     const { data, error } = await supabase
       .from('cars')
       .insert({
         ...validatedData,
         user_id: user.id,
-        purchase_price_lyd: purchasePriceLYD,
-        final_cost,
-        profit,
+        trip_id: tripId,
+        container_id: containerId,
+        purchase_price_usd: financials.purchase_price_usd,
+        purchase_price_lyd: financials.purchase_price_lyd,
+        final_cost: financials.final_cost,
+        profit: financials.profit,
       })
       .select()
       .single();
@@ -117,38 +119,38 @@ export async function PUT(request: NextRequest) {
 
     const validatedData = carSchema.parse(updateData);
 
+    const skipCapacity =
+      validatedData.purchase_mode === 'local' ||
+      validatedData.purchase_mode === 'shared_container';
+
     const capacityCheck = await assertContainerHasCapacity(
       supabase,
       user.id,
       validatedData.container_id,
-      id
+      id,
+      { skipCapacityCheck: skipCapacity }
     );
     if (!capacityCheck.ok) {
       return NextResponse.json({ error: capacityCheck.error }, { status: 400 });
     }
 
-    // Calculate final cost
-    const purchasePriceLYD =
-      validatedData.purchase_price_usd * validatedData.exchange_rate;
-    const final_cost =
-      purchasePriceLYD +
-      validatedData.shipping_allocation +
-      validatedData.customs_allocation +
-      validatedData.expense_allocation;
+    const financials = computeCarFinancials(validatedData);
 
-    // Calculate profit if selling price is provided
-    let profit = null;
-    if (validatedData.selling_price) {
-      profit = validatedData.selling_price - final_cost;
-    }
+    const tripId =
+      validatedData.purchase_mode === 'local' ? null : validatedData.trip_id ?? null;
+    const containerId =
+      validatedData.purchase_mode === 'local' ? null : validatedData.container_id ?? null;
 
     const { data, error } = await supabase
       .from('cars')
       .update({
         ...validatedData,
-        purchase_price_lyd: purchasePriceLYD,
-        final_cost,
-        profit,
+        trip_id: tripId,
+        container_id: containerId,
+        purchase_price_usd: financials.purchase_price_usd,
+        purchase_price_lyd: financials.purchase_price_lyd,
+        final_cost: financials.final_cost,
+        profit: financials.profit,
       })
       .eq('id', id)
       .eq('user_id', user.id)

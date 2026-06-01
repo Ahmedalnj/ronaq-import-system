@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { containerFullMessage } from '@/lib/containers/capacity';
+import type { CarPurchaseMode } from '@/types';
 import { useAuth } from '@/hooks/use-auth';
 import { RtlLayout } from '@/components/shared/layout';
 import { Button } from '@/components/ui/button';
@@ -119,7 +120,8 @@ export default function CarsPage() {
 
   // Add Car Dialog State
   const [showAddForm, setShowAddForm] = useState(false);
-  const [newCar, setNewCar] = useState({
+  const defaultNewCar = () => ({
+    purchase_mode: 'import' as CarPurchaseMode,
     vin_number: '',
     car_name: '',
     brand: 'كوري',
@@ -129,41 +131,54 @@ export default function CarsPage() {
     purchase_price_krw: 0,
     exchange_rate_usd_krw: 1350,
     purchase_price_usd: 0,
+    purchase_price_lyd: 0,
     exchange_rate: 6.50,
     trip_id: '',
     container_id: '',
+    external_container_ref: '',
+    shipping_allocation: 0,
+    link_fees_allocation: 0,
+    customs_allocation: 0,
+    clearance_allocation: 0,
+    expense_allocation: 0,
     image_url: '',
   });
 
+  const [newCar, setNewCar] = useState(defaultNewCar);
+
   // Automatically calculate prices when KRW, Exchange Rate, or Trip changes
   useEffect(() => {
+    if (newCar.purchase_mode !== 'import') return;
+
     const krw = Number(newCar.purchase_price_krw || 0);
     const rateUsdKrw = Number(newCar.exchange_rate_usd_krw || 1350);
-    
-    // Calculate USD Price
-    const computedUsd = rateUsdKrw > 0 ? (krw / rateUsdKrw) : 0;
-    
-    // Find selected trip's exchange rate or fallback to default
-    let activeExchangeRate = 6.50;
+    const computedUsd = rateUsdKrw > 0 ? krw / rateUsdKrw : 0;
+
+    let activeExchangeRate = 6.5;
     if (newCar.trip_id) {
-      const selectedTrip = trips.find(t => t.id === newCar.trip_id);
-      if (selectedTrip && selectedTrip.average_exchange_rate) {
+      const selectedTrip = trips.find((t) => t.id === newCar.trip_id);
+      if (selectedTrip?.average_exchange_rate) {
         activeExchangeRate = Number(selectedTrip.average_exchange_rate);
       }
     }
 
-    // Update state only if values changed to prevent infinite loops
     if (
-      Math.abs(newCar.purchase_price_usd - computedUsd) > 0.01 || 
+      Math.abs(newCar.purchase_price_usd - computedUsd) > 0.01 ||
       Math.abs(newCar.exchange_rate - activeExchangeRate) > 0.01
     ) {
-      setNewCar(prev => ({
+      setNewCar((prev) => ({
         ...prev,
         purchase_price_usd: Number(computedUsd.toFixed(2)),
         exchange_rate: activeExchangeRate,
       }));
     }
-  }, [newCar.purchase_price_krw, newCar.exchange_rate_usd_krw, newCar.trip_id, trips]);
+  }, [
+    newCar.purchase_mode,
+    newCar.purchase_price_krw,
+    newCar.exchange_rate_usd_krw,
+    newCar.trip_id,
+    trips,
+  ]);
 
   useEffect(() => {
     if (!user) return;
@@ -239,7 +254,7 @@ export default function CarsPage() {
     setSuccess('');
 
     try {
-      if (newCar.container_id) {
+      if (newCar.purchase_mode === 'import' && newCar.container_id) {
         const slot = getContainerSlotInfo(newCar.container_id);
         if (slot.isFull) {
           throw new Error(
@@ -248,19 +263,33 @@ export default function CarsPage() {
         }
       }
 
+      if (newCar.purchase_mode === 'local' && !Number(newCar.purchase_price_lyd)) {
+        throw new Error('أدخل سعر الشراء بالدينار للشراء المحلي');
+      }
+
       const response = await fetch('/api/cars', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...newCar,
           purchase_price_usd: Number(newCar.purchase_price_usd),
+          purchase_price_lyd: Number(newCar.purchase_price_lyd),
           purchase_price_krw: Number(newCar.purchase_price_krw),
           exchange_rate_usd_krw: Number(newCar.exchange_rate_usd_krw),
           exchange_rate: Number(newCar.exchange_rate),
           year: Number(newCar.year),
-          shipping_allocation: 0,
-          customs_allocation: 0,
-          expense_allocation: 0,
+          shipping_allocation: Number(newCar.shipping_allocation),
+          link_fees_allocation: Number(newCar.link_fees_allocation),
+          customs_allocation: Number(newCar.customs_allocation),
+          clearance_allocation: Number(newCar.clearance_allocation),
+          expense_allocation: Number(newCar.expense_allocation),
+          trip_id: newCar.purchase_mode === 'local' ? null : newCar.trip_id || null,
+          container_id:
+            newCar.purchase_mode === 'local' ? null : newCar.container_id || null,
+          external_container_ref:
+            newCar.purchase_mode === 'shared_container'
+              ? newCar.external_container_ref || null
+              : null,
           image_urls: newCar.image_url ? [newCar.image_url] : [],
           status: 'available',
         }),
@@ -276,21 +305,7 @@ export default function CarsPage() {
       setSuccess('تم إضافة السيارة الجديدة بنجاح! سيتم حساب تكاليفها تلقائياً.');
       setShowAddForm(false);
       setImagePreview('');
-      setNewCar({
-        vin_number: '',
-        car_name: '',
-        brand: 'كوري',
-        model: 'غير معروف',
-        year: new Date().getFullYear(),
-        color: 'غير محدد',
-        purchase_price_krw: 0,
-        exchange_rate_usd_krw: 1350,
-        purchase_price_usd: 0,
-        exchange_rate: 6.50,
-        trip_id: '',
-        container_id: '',
-        image_url: '',
-      });
+      setNewCar(defaultNewCar());
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -384,10 +399,42 @@ export default function CarsPage() {
             <Card className="w-full max-w-xl max-h-[90vh] overflow-y-auto">
               <CardHeader>
                 <CardTitle>إضافة سيارة جديدة للمخزون</CardTitle>
-                <CardDescription>أدخل بيانات السيارة وسعر الشراء بالوون الكوري، وسيتم احتساب التكاليف بالدولار والدينار تلقائياً.</CardDescription>
+                <CardDescription>
+                  اختر نوع الشراء: استيراد، شراء محلي بالدينار، أو سيارات في حاوية طرف آخر بتكلفة لكل سيارة.
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 <form onSubmit={handleAddCarSubmit} className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    {(
+                      [
+                        { id: 'import', label: 'استيراد (كوري/دولار)' },
+                        { id: 'local', label: 'شراء محلي (د.ل)' },
+                        { id: 'shared_container', label: 'حاوية مشتركة / لكل سيارة' },
+                      ] as const
+                    ).map((mode) => (
+                      <button
+                        key={mode.id}
+                        type="button"
+                        onClick={() =>
+                          setNewCar((prev) => ({
+                            ...defaultNewCar(),
+                            purchase_mode: mode.id,
+                            vin_number: prev.vin_number,
+                            car_name: prev.car_name,
+                          }))
+                        }
+                        className={`p-3 rounded-lg border text-sm font-bold transition-colors ${
+                          newCar.purchase_mode === mode.id
+                            ? 'border-[#0A7C6E] bg-[#0A7C6E]/10 text-[#0A7C6E]'
+                            : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        {mode.label}
+                      </button>
+                    ))}
+                  </div>
+
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <label className="block">
                       <span className="text-sm text-slate-500 mb-1 block font-medium">اسم السيارة</span>
@@ -412,59 +459,219 @@ export default function CarsPage() {
                     </label>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <label className="block">
-                      <span className="text-sm text-slate-500 mb-1 block font-medium">الرحلة المرتبطة</span>
-                      <select
+                  {newCar.purchase_mode === 'local' && (
+                    <label className="block p-4 bg-blue-50 rounded-lg border border-blue-100">
+                      <span className="text-sm text-blue-800 mb-1 block font-bold">سعر الشراء المحلي (د.ل)</span>
+                      <Input
+                        type="number"
+                        min="0"
                         required
-                        className="w-full h-10 px-3 rounded-md border border-slate-200 dark:border-slate-800 bg-white text-sm"
-                        value={newCar.trip_id}
-                        onChange={(e) => setNewCar({ ...newCar, trip_id: e.target.value })}
-                      >
-                        <option value="">-- اختر رحلة الاستيراد --</option>
-                        {trips.map((t) => (
-                          <option key={t.id} value={t.id}>{t.trip_name}</option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <label className="block">
-                      <span className="text-sm text-slate-500 mb-1 block font-medium">الحاوية المرتبطة (اختياري)</span>
-                      <select
-                        className="w-full h-10 px-3 rounded-md border border-slate-200 dark:border-slate-800 bg-white text-sm"
-                        value={newCar.container_id}
-                        onChange={(e) => setNewCar({ ...newCar, container_id: e.target.value })}
-                      >
-                        <option value="">لا يوجد حاوية</option>
-                        {containers.map((c) => {
-                          const capacity = Number(c.cars_count) || 6;
-                          const used = containerUsage[c.id] || 0;
-                          const isFull = used >= capacity;
-                          return (
-                            <option key={c.id} value={c.id} disabled={isFull}>
-                              {c.container_number || c.id.substring(0, 8)} ({used}/{capacity} سيارات)
-                              {isFull ? ' — ممتلئة' : ''}
-                            </option>
-                          );
-                        })}
-                      </select>
-                      {newCar.container_id && (() => {
-                        const slot = getContainerSlotInfo(newCar.container_id);
-                        if (slot.isFull) {
-                          return (
-                            <p className="text-xs text-red-600 mt-1 font-semibold">
-                              {containerFullMessage(slot.label || '', slot.capacity)}
-                            </p>
-                          );
+                        placeholder="مثال: 85000"
+                        value={newCar.purchase_price_lyd || ''}
+                        onChange={(e) =>
+                          setNewCar({ ...newCar, purchase_price_lyd: Number(e.target.value) })
                         }
-                        return (
-                          <p className="text-xs text-slate-500 mt-1">
-                            متبقي في الحاوية: {slot.capacity - slot.used} من {slot.capacity} سيارات
-                          </p>
-                        );
-                      })()}
+                      />
+                      <p className="text-xs text-blue-700 mt-2">
+                        لا حاجة لرحلة أو حاوية — التكلفة النهائية = سعر الشراء + أي مصاريف إضافية أدناه.
+                      </p>
                     </label>
-                  </div>
+                  )}
+
+                  {newCar.purchase_mode === 'import' && (
+                    <>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-slate-50 rounded-lg border border-slate-100">
+                        <label className="block">
+                          <span className="text-sm text-slate-500 mb-1 block font-medium">سعر الشراء (KRW)</span>
+                          <Input
+                            type="number"
+                            min="0"
+                            value={newCar.purchase_price_krw || ''}
+                            onChange={(e) =>
+                              setNewCar({ ...newCar, purchase_price_krw: Number(e.target.value) })
+                            }
+                          />
+                        </label>
+                        <label className="block">
+                          <span className="text-sm text-slate-500 mb-1 block font-medium">سعر الصرف KRW/USD</span>
+                          <Input
+                            type="number"
+                            min="0"
+                            value={newCar.exchange_rate_usd_krw || ''}
+                            onChange={(e) =>
+                              setNewCar({ ...newCar, exchange_rate_usd_krw: Number(e.target.value) })
+                            }
+                          />
+                        </label>
+                        <label className="block">
+                          <span className="text-sm text-slate-500 mb-1 block font-medium">السعر بالدولار (محسوب)</span>
+                          <Input type="number" readOnly value={newCar.purchase_price_usd} className="bg-white" />
+                        </label>
+                        <label className="block">
+                          <span className="text-sm text-slate-500 mb-1 block font-medium">سعر الصرف USD/LYD</span>
+                          <Input type="number" readOnly value={newCar.exchange_rate} className="bg-white" />
+                        </label>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <label className="block">
+                          <span className="text-sm text-slate-500 mb-1 block font-medium">الرحلة (اختياري)</span>
+                          <select
+                            className="w-full h-10 px-3 rounded-md border border-slate-200 bg-white text-sm"
+                            value={newCar.trip_id}
+                            onChange={(e) => setNewCar({ ...newCar, trip_id: e.target.value })}
+                          >
+                            <option value="">بدون رحلة</option>
+                            {trips.map((t) => (
+                              <option key={t.id} value={t.id}>
+                                {t.trip_name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="block">
+                          <span className="text-sm text-slate-500 mb-1 block font-medium">حاويتك (اختياري)</span>
+                          <select
+                            className="w-full h-10 px-3 rounded-md border border-slate-200 bg-white text-sm"
+                            value={newCar.container_id}
+                            onChange={(e) => setNewCar({ ...newCar, container_id: e.target.value })}
+                          >
+                            <option value="">بدون حاوية</option>
+                            {containers.map((c) => {
+                              const capacity = Number(c.cars_count) || 6;
+                              const used = containerUsage[c.id] || 0;
+                              const isFull = used >= capacity;
+                              return (
+                                <option key={c.id} value={c.id} disabled={isFull}>
+                                  {c.container_number || c.id.substring(0, 8)} ({used}/{capacity})
+                                  {isFull ? ' — ممتلئة' : ''}
+                                </option>
+                              );
+                            })}
+                          </select>
+                        </label>
+                      </div>
+                    </>
+                  )}
+
+                  {newCar.purchase_mode === 'shared_container' && (
+                    <div className="space-y-4 p-4 bg-amber-50/50 rounded-lg border border-amber-100">
+                      <p className="text-sm text-amber-900 font-medium">
+                        سيارة أو سيارتان في حاوية شخص آخر — أدخل تكلفة الشحن والربط والجمارك{' '}
+                        <strong>لهذه السيارة فقط</strong> (وليس للحاوية كاملة).
+                      </p>
+                      <label className="block">
+                        <span className="text-sm text-slate-600 mb-1 block">مرجع الحاوية (اسم المالك / رقم)</span>
+                        <Input
+                          type="text"
+                          placeholder="مثال: حاوية أبو محمد MSCU123"
+                          value={newCar.external_container_ref}
+                          onChange={(e) =>
+                            setNewCar({ ...newCar, external_container_ref: e.target.value })
+                          }
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-sm text-slate-600 mb-1 block">ربط بحاوية بالنظام (اختياري — لا يحسب ضمن السعة)</span>
+                        <select
+                          className="w-full h-10 px-3 rounded-md border border-slate-200 bg-white text-sm"
+                          value={newCar.container_id}
+                          onChange={(e) => setNewCar({ ...newCar, container_id: e.target.value })}
+                        >
+                          <option value="">بدون ربط</option>
+                          {containers.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.container_number || c.id.substring(0, 8)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="block">
+                        <span className="text-sm text-slate-600 mb-1 block">الرحلة (اختياري)</span>
+                        <select
+                          className="w-full h-10 px-3 rounded-md border border-slate-200 bg-white text-sm"
+                          value={newCar.trip_id}
+                          onChange={(e) => setNewCar({ ...newCar, trip_id: e.target.value })}
+                        >
+                          <option value="">بدون رحلة</option>
+                          {trips.map((t) => (
+                            <option key={t.id} value={t.id}>
+                              {t.trip_name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                        <label className="block">
+                          <span className="text-xs text-emerald-800 font-bold">شحن ($)</span>
+                          <Input
+                            type="number"
+                            min="0"
+                            value={newCar.shipping_allocation || ''}
+                            onChange={(e) =>
+                              setNewCar({ ...newCar, shipping_allocation: Number(e.target.value) })
+                            }
+                          />
+                        </label>
+                        <label className="block">
+                          <span className="text-xs text-emerald-800 font-bold">ربط ($)</span>
+                          <Input
+                            type="number"
+                            min="0"
+                            value={newCar.link_fees_allocation || ''}
+                            onChange={(e) =>
+                              setNewCar({ ...newCar, link_fees_allocation: Number(e.target.value) })
+                            }
+                          />
+                        </label>
+                        <label className="block">
+                          <span className="text-xs text-slate-600 font-bold">سعر الصرف</span>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={newCar.exchange_rate || ''}
+                            onChange={(e) =>
+                              setNewCar({ ...newCar, exchange_rate: Number(e.target.value) })
+                            }
+                          />
+                        </label>
+                        <label className="block">
+                          <span className="text-xs text-blue-800 font-bold">جمارك (د.ل)</span>
+                          <Input
+                            type="number"
+                            min="0"
+                            value={newCar.customs_allocation || ''}
+                            onChange={(e) =>
+                              setNewCar({ ...newCar, customs_allocation: Number(e.target.value) })
+                            }
+                          />
+                        </label>
+                        <label className="block">
+                          <span className="text-xs text-blue-800 font-bold">تخليص (د.ل)</span>
+                          <Input
+                            type="number"
+                            min="0"
+                            value={newCar.clearance_allocation || ''}
+                            onChange={(e) =>
+                              setNewCar({ ...newCar, clearance_allocation: Number(e.target.value) })
+                            }
+                          />
+                        </label>
+                        <label className="block">
+                          <span className="text-xs text-slate-600 font-bold">أخرى (د.ل)</span>
+                          <Input
+                            type="number"
+                            min="0"
+                            value={newCar.expense_allocation || ''}
+                            onChange={(e) =>
+                              setNewCar({ ...newCar, expense_allocation: Number(e.target.value) })
+                            }
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  )}
 
                   <div className="block">
                     <span className="text-sm text-slate-500 mb-1 block font-medium">صورة السيارة (تحميل ملف)</span>
@@ -504,52 +711,23 @@ export default function CarsPage() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border-t border-slate-100 dark:border-slate-800 pt-4 bg-blue-50/10 p-3 rounded-lg border border-blue-100">
-                    <label className="block">
-                      <span className="text-sm text-slate-600 mb-1 block font-bold">₩ سعر الشراء بالوون الكوري</span>
-                      <Input
-                        type="number"
-                        min="0"
-                        required
-                        placeholder="مثال: 12000000"
-                        value={newCar.purchase_price_krw || ''}
-                        onChange={(e) => setNewCar({ ...newCar, purchase_price_krw: Number(e.target.value) })}
-                      />
-                    </label>
-
-                    <label className="block">
-                      <span className="text-sm text-slate-600 mb-1 block font-bold">📈 سعر صرف الدولار مقابل الوون (KRW/$)</span>
-                      <Input
-                        type="number"
-                        min="0"
-                        required
-                        placeholder="مثال: 1350"
-                        value={newCar.exchange_rate_usd_krw || ''}
-                        onChange={(e) => setNewCar({ ...newCar, exchange_rate_usd_krw: Number(e.target.value) })}
-                      />
-                    </label>
-                  </div>
-
-                  {/* Computed dynamic values previews */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-emerald-50/10 p-3 rounded-lg border border-emerald-100">
-                    <div className="block">
-                      <span className="text-sm text-emerald-800 mb-1 block font-medium">💵 سعر السيارة بالدولار (تقريبي)</span>
-                      <div className="w-full h-10 px-3 flex items-center rounded-md border border-emerald-200 bg-white font-extrabold text-emerald-700">
-                        {newCar.purchase_price_usd.toLocaleString('en-US', { minimumFractionDigits: 2 })} $
+                  {newCar.purchase_mode === 'import' && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-emerald-50/10 p-3 rounded-lg border border-emerald-100">
+                      <div className="block">
+                        <span className="text-sm text-emerald-800 mb-1 block font-medium">تقدير بالدولار</span>
+                        <div className="w-full h-10 px-3 flex items-center rounded-md border border-emerald-200 bg-white font-extrabold text-emerald-700">
+                          {newCar.purchase_price_usd.toLocaleString('en-US', { minimumFractionDigits: 2 })} $
+                        </div>
                       </div>
-                    </div>
-
-                    <div className="block">
-                      <span className="text-sm text-emerald-800 mb-1 block font-medium">💰 سعر السيارة بالدينار (حسب سعر الصرف)</span>
-                      <div className="w-full h-10 px-3 flex items-center rounded-md border border-emerald-200 bg-white font-extrabold text-[#0A7C6E]">
-                        {(newCar.purchase_price_usd * newCar.exchange_rate).toLocaleString('ar-LY', { minimumFractionDigits: 2 })} د.ل
+                      <div className="block">
+                        <span className="text-sm text-emerald-800 mb-1 block font-medium">تقدير بالدينار</span>
+                        <div className="w-full h-10 px-3 flex items-center rounded-md border border-emerald-200 bg-white font-extrabold text-[#0A7C6E]">
+                          {(newCar.purchase_price_usd * newCar.exchange_rate).toLocaleString('ar-LY', {
+                            minimumFractionDigits: 2,
+                          })}{' '}
+                          د.ل
+                        </div>
                       </div>
-                    </div>
-                  </div>
-
-                  {newCar.trip_id && (
-                    <div className="text-xs text-slate-500 italic px-1">
-                      * سعر الصرف المستخدم للرحلة الحالية: {newCar.exchange_rate.toFixed(3)} د.ل/$
                     </div>
                   )}
 
@@ -560,7 +738,9 @@ export default function CarsPage() {
                       disabled={
                         submitting ||
                         Boolean(
-                          newCar.container_id && getContainerSlotInfo(newCar.container_id).isFull
+                          newCar.purchase_mode === 'import' &&
+                            newCar.container_id &&
+                            getContainerSlotInfo(newCar.container_id).isFull
                         )
                       }
                     >

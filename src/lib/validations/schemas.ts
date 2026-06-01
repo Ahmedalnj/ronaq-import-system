@@ -44,26 +44,69 @@ export const containerSchema = z.object({
 });
 
 // Car Schemas
-export const carSchema = z.object({
-  vin_number: z.string().min(5, 'رقم الهيكل يجب أن يكون 5 أحرف على الأقل'),
-  car_name: z.string().min(2, 'اسم السيارة مطلوب'),
-  brand: z.string().min(1).optional().default('كوري'),
-  model: z.string().min(1).optional().default('غير معروف'),
-  year: z.number().int().min(1990).max(2100).optional().default(new Date().getFullYear()),
-  color: z.string().min(1).optional().default('غير محدد'),
-  purchase_price_usd: z.number().min(0),
-  purchase_price_krw: z.number().min(0).optional().default(0),
-  exchange_rate_usd_krw: z.number().min(0).optional().default(1350),
-  exchange_rate: z.number().min(0),
-  shipping_allocation: z.number().min(0).optional().default(0),
-  customs_allocation: z.number().min(0).optional().default(0),
-  expense_allocation: z.number().min(0).optional().default(0),
-  selling_price: z.number().min(0).optional(),
-  status: z.enum(['available', 'reserved', 'sold', 'installment', 'in_transit']),
-  trip_id: optionalUuidSchema,
-  container_id: optionalUuidSchema,
-  image_urls: z.array(z.string()).optional().default([]),
-});
+export const carSchema = z
+  .object({
+    vin_number: z.string().min(5, 'رقم الهيكل يجب أن يكون 5 أحرف على الأقل'),
+    car_name: z.string().min(2, 'اسم السيارة مطلوب'),
+    brand: z.string().min(1).optional().default('كوري'),
+    model: z.string().min(1).optional().default('غير معروف'),
+    year: z.number().int().min(1990).max(2100).optional().default(new Date().getFullYear()),
+    color: z.string().min(1).optional().default('غير محدد'),
+    purchase_mode: z.enum(['import', 'local', 'shared_container']).optional().default('import'),
+    purchase_price_usd: z.number().min(0).optional().default(0),
+    purchase_price_lyd: z.number().min(0).optional(),
+    purchase_price_krw: z.number().min(0).optional().default(0),
+    exchange_rate_usd_krw: z.number().min(0).optional().default(1350),
+    exchange_rate: z.number().min(0).optional().default(1),
+    shipping_allocation: z.number().min(0).optional().default(0),
+    link_fees_allocation: z.number().min(0).optional().default(0),
+    customs_allocation: z.number().min(0).optional().default(0),
+    clearance_allocation: z.number().min(0).optional().default(0),
+    expense_allocation: z.number().min(0).optional().default(0),
+    external_container_ref: z.string().optional(),
+    selling_price: z.number().min(0).optional(),
+    status: z.enum(['available', 'reserved', 'sold', 'installment', 'in_transit']),
+    trip_id: optionalUuidSchema,
+    container_id: optionalUuidSchema,
+    image_urls: z.array(z.string()).optional().default([]),
+  })
+  .superRefine((data, ctx) => {
+    if (data.purchase_mode === 'local') {
+      const lyd = data.purchase_price_lyd ?? data.purchase_price_usd;
+      if (!lyd || lyd <= 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'سعر الشراء بالدينار مطلوب للشراء المحلي',
+          path: ['purchase_price_lyd'],
+        });
+      }
+    } else if (data.purchase_mode === 'import') {
+      if (!data.purchase_price_krw && !data.purchase_price_usd) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'أدخل سعر الشراء بالوون أو بالدولار',
+          path: ['purchase_price_krw'],
+        });
+      }
+    } else if (data.purchase_mode === 'shared_container') {
+      const hasPurchase =
+        (data.purchase_price_krw && data.purchase_price_krw > 0) ||
+        (data.purchase_price_usd && data.purchase_price_usd > 0) ||
+        (data.purchase_price_lyd && data.purchase_price_lyd > 0);
+      const hasLogistics =
+        (data.shipping_allocation && data.shipping_allocation > 0) ||
+        (data.link_fees_allocation && data.link_fees_allocation > 0) ||
+        (data.customs_allocation && data.customs_allocation > 0) ||
+        (data.clearance_allocation && data.clearance_allocation > 0);
+      if (!hasPurchase && !hasLogistics) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'أدخل سعر شراء أو تكاليف الشحن/الجمارك للسيارة',
+          path: ['shipping_allocation'],
+        });
+      }
+    }
+  });
 
 // Expense Schemas
 export const expenseSchema = z.object({

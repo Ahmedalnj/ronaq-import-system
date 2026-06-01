@@ -42,6 +42,8 @@ export interface Container {
   updated_at: string;
 }
 
+export type CarPurchaseMode = 'import' | 'local' | 'shared_container';
+
 export interface Car {
   id: string;
   user_id: string;
@@ -51,12 +53,16 @@ export interface Car {
   model: string;
   year: number;
   color: string;
+  purchase_mode?: CarPurchaseMode;
   purchase_price_usd: number;
   exchange_rate: number;
   purchase_price_lyd: number;
   shipping_allocation: number;
+  link_fees_allocation?: number;
   customs_allocation: number;
+  clearance_allocation?: number;
   expense_allocation: number;
+  external_container_ref?: string;
   final_cost: number;
   selling_price?: number;
   profit?: number;
