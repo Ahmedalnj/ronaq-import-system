@@ -6,7 +6,8 @@ import { RtlLayout } from '@/components/shared/layout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Loader, Plus, Ship, Package, Trash2, Edit, Calendar, DollarSign, RefreshCw } from 'lucide-react';
+import Link from 'next/link';
+import { Loader, Plus, Ship, Package, Trash2, Edit, DollarSign, RefreshCw, X, Car, Receipt, Eye } from 'lucide-react';
 
 interface Trip {
   id: string;
@@ -31,6 +32,48 @@ interface Container {
   };
 }
 
+interface ContainerExpense {
+  id: string;
+  expense_type: string;
+  currency: 'USD' | 'LYD' | 'EUR';
+  amount: number;
+  paid_amount: number;
+  remaining_amount: number;
+  status: 'paid' | 'partial' | 'unpaid';
+  date: string;
+  notes?: string;
+}
+
+interface ContainerCar {
+  id: string;
+  car_name: string;
+  brand: string;
+  model: string;
+  year: number;
+  vin_number: string;
+  status: string;
+  final_cost: number;
+  purchase_price_lyd: number;
+}
+
+interface ContainerDetails {
+  container: Container;
+  expenses: ContainerExpense[];
+  cars: ContainerCar[];
+  summary: {
+    cars_count: number;
+    cars_capacity: number;
+    expenses_count: number;
+    expenses_total_usd: number;
+    expenses_total_lyd: number;
+    container_shipping_usd: number;
+    container_link_usd: number;
+    container_customs_lyd: number;
+    container_clearance_lyd: number;
+    container_port_lyd: number;
+  };
+}
+
 export default function ContainersPage() {
   const { user, loading: authLoading } = useAuth();
   const [containers, setContainers] = useState<Container[]>([]);
@@ -46,6 +89,9 @@ export default function ContainersPage() {
   // Form State
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingContainer, setEditingContainer] = useState<Container | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [containerDetails, setContainerDetails] = useState<ContainerDetails | null>(null);
 
   const [formData, setFormData] = useState({
     trip_id: '',
@@ -149,7 +195,71 @@ export default function ContainersPage() {
     }
   };
 
-  const handleEdit = (container: Container) => {
+  const openContainerDetails = async (container: Container) => {
+    setDetailOpen(true);
+    setDetailLoading(true);
+    setContainerDetails(null);
+    setError('');
+
+    try {
+      const response = await fetch(`/api/containers/${container.id}`);
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error || 'فشل في جلب تفاصيل الحاوية');
+      }
+      const data = await response.json();
+      setContainerDetails(data);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'فشل في جلب تفاصيل الحاوية');
+      setDetailOpen(false);
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  const getExpenseTypeLabel = (type: string) => {
+    const labels: Record<string, string> = {
+      shipping: 'شحن بحري',
+      customs: 'جمارك',
+      clearance: 'تخليص',
+      link_fees: 'رسوم ربط',
+      transportation: 'نقل',
+      office: 'مكتب',
+      other: 'أخرى',
+    };
+    return labels[type] || type;
+  };
+
+  const getExpenseStatusLabel = (status: ContainerExpense['status']) => {
+    switch (status) {
+      case 'paid':
+        return 'مدفوع';
+      case 'partial':
+        return 'مدفوع جزئياً';
+      default:
+        return 'غير مدفوع';
+    }
+  };
+
+  const getCarStatusLabel = (status: string) => {
+    switch (status) {
+      case 'available':
+        return 'متاحة';
+      case 'reserved':
+        return 'محجوزة';
+      case 'sold':
+        return 'مباعة';
+      case 'installment':
+        return 'تقسيط';
+      case 'in_transit':
+        return 'في الطريق';
+      default:
+        return status;
+    }
+  };
+
+  const handleEdit = (container: Container, e?: React.MouseEvent) => {
+    e?.stopPropagation();
     setEditingContainer(container);
     setFormData({
       trip_id: container.trip_id,
@@ -166,7 +276,8 @@ export default function ContainersPage() {
     setShowAddForm(true);
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (id: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
     if (!confirm('هل أنت متأكد من رغبتك في حذف هذه الحاوية؟ سيؤدي ذلك لحذف المصاريف والبيانات المالية المرتبطة بها.')) return;
     setError('');
     setSuccess('');
@@ -474,7 +585,7 @@ export default function ContainersPage() {
         <Card>
           <CardHeader>
             <CardTitle>📋 سجل الحاويات البحرية</CardTitle>
-            <CardDescription>عرض وتعديل الحاويات ومصاريف التخليص الجمركي والشحن التابع لها بمختلف العملات</CardDescription>
+            <CardDescription>اضغط على أي حاوية لعرض مصاريفها والسيارات الموجودة فيها</CardDescription>
           </CardHeader>
           <CardContent className="overflow-x-auto">
             {containers.length === 0 ? (
@@ -501,9 +612,16 @@ export default function ContainersPage() {
                       ((Number(container.shipping_cost) + Number(container.link_fees)) * customRate) + 
                       Number(container.customs_cost) + Number(container.clearance_cost) + Number(container.port_fees);
                     return (
-                      <tr key={container.id} className="hover:bg-slate-50/50 transition-colors">
-                        <td className="py-4 pr-2 font-mono font-medium">
-                          {container.container_number || `Container #${container.id.substring(0, 8)}`}
+                      <tr
+                        key={container.id}
+                        className="hover:bg-[#0A7C6E]/5 transition-colors cursor-pointer"
+                        onClick={() => openContainerDetails(container)}
+                      >
+                        <td className="py-4 pr-2 font-mono font-medium text-[#0A7C6E]">
+                          <span className="inline-flex items-center gap-1.5">
+                            <Eye className="w-3.5 h-3.5 opacity-70" />
+                            {container.container_number || `Container #${container.id.substring(0, 8)}`}
+                          </span>
                         </td>
                         <td className="py-4 font-semibold text-slate-900">
                           {container.trips?.trip_name || 'غير معروف'}
@@ -527,7 +645,7 @@ export default function ContainersPage() {
                               variant="outline"
                               size="icon"
                               className="w-8 h-8 text-blue-600 hover:text-blue-700 border-blue-100 hover:bg-blue-50"
-                              onClick={() => handleEdit(container)}
+                              onClick={(e) => handleEdit(container, e)}
                             >
                               <Edit size={14} />
                             </Button>
@@ -535,7 +653,7 @@ export default function ContainersPage() {
                               variant="outline"
                               size="icon"
                               className="w-8 h-8 text-red-600 hover:text-red-700 border-red-100 hover:bg-red-50"
-                              onClick={() => handleDelete(container.id)}
+                              onClick={(e) => handleDelete(container.id, e)}
                             >
                               <Trash2 size={14} />
                             </Button>
@@ -549,6 +667,194 @@ export default function ContainersPage() {
             )}
           </CardContent>
         </Card>
+
+        {/* Container details modal */}
+        {detailOpen && (
+          <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 overflow-y-auto">
+            <Card className="w-full max-w-4xl max-h-[92vh] overflow-hidden flex flex-col">
+              <CardHeader className="border-b border-slate-100 flex flex-row items-start justify-between gap-4">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-xl">
+                    <Package className="w-5 h-5 text-[#0A7C6E]" />
+                    {containerDetails?.container.container_number || 'تفاصيل الحاوية'}
+                  </CardTitle>
+                  <CardDescription className="mt-1">
+                    {containerDetails?.container.trips?.trip_name && (
+                      <span>الرحلة: {containerDetails.container.trips.trip_name} · </span>
+                    )}
+                    اضغط على صف الحاوية لعرض المصاريف والسيارات
+                  </CardDescription>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setDetailOpen(false)}
+                  className="text-slate-400 hover:text-slate-700 p-2 rounded-full hover:bg-slate-100"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </CardHeader>
+
+              <CardContent className="flex-1 overflow-y-auto p-6 space-y-6">
+                {detailLoading ? (
+                  <div className="flex flex-col items-center justify-center py-16">
+                    <Loader className="w-8 h-8 animate-spin text-[#0A7C6E]" />
+                    <p className="text-slate-500 text-sm mt-3">جاري تحميل التفاصيل...</p>
+                  </div>
+                ) : containerDetails ? (
+                  <>
+                    {/* Container cost summary */}
+                    <div>
+                      <h3 className="font-bold text-slate-800 mb-3 flex items-center gap-2">
+                        <Receipt className="w-4 h-4 text-[#0A7C6E]" />
+                        مصاريف الحاوية (من بيانات الحاوية)
+                      </h3>
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                        <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-100">
+                          <p className="text-xs text-emerald-700">شحن بحري</p>
+                          <p className="font-bold text-emerald-800">{usdFormat(containerDetails.summary.container_shipping_usd)}</p>
+                        </div>
+                        <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-100">
+                          <p className="text-xs text-emerald-700">رسوم ربط</p>
+                          <p className="font-bold text-emerald-800">{usdFormat(containerDetails.summary.container_link_usd)}</p>
+                        </div>
+                        <div className="p-3 rounded-lg bg-blue-50 border border-blue-100">
+                          <p className="text-xs text-blue-700">جمارك</p>
+                          <p className="font-bold text-blue-800">{lydFormat(containerDetails.summary.container_customs_lyd)}</p>
+                        </div>
+                        <div className="p-3 rounded-lg bg-blue-50 border border-blue-100">
+                          <p className="text-xs text-blue-700">تخليص</p>
+                          <p className="font-bold text-blue-800">{lydFormat(containerDetails.summary.container_clearance_lyd)}</p>
+                        </div>
+                        <div className="p-3 rounded-lg bg-blue-50 border border-blue-100">
+                          <p className="text-xs text-blue-700">رسوم ميناء</p>
+                          <p className="font-bold text-blue-800">{lydFormat(containerDetails.summary.container_port_lyd)}</p>
+                        </div>
+                        <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
+                          <p className="text-xs text-slate-600">حالة الحاوية</p>
+                          <p className="font-bold text-slate-800">{getStatusLabel(containerDetails.container.status)}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Linked expenses */}
+                    <div>
+                      <h3 className="font-bold text-slate-800 mb-3 flex items-center justify-between gap-2">
+                        <span className="flex items-center gap-2">
+                          <DollarSign className="w-4 h-4 text-[#F59E0B]" />
+                          سجل المصاريف المرتبطة ({containerDetails.expenses.length})
+                        </span>
+                        <span className="text-xs font-normal text-slate-500">
+                          {usdFormat(containerDetails.summary.expenses_total_usd)} + {lydFormat(containerDetails.summary.expenses_total_lyd)}
+                        </span>
+                      </h3>
+                      {containerDetails.expenses.length === 0 ? (
+                        <p className="text-sm text-slate-500 bg-slate-50 rounded-lg p-4 text-center">
+                          لا توجد مصاريف مسجلة في جدول المصاريف لهذه الحاوية.
+                        </p>
+                      ) : (
+                        <div className="overflow-x-auto rounded-lg border border-slate-100">
+                          <table className="w-full text-right text-sm">
+                            <thead>
+                              <tr className="bg-slate-50 text-slate-600">
+                                <th className="px-3 py-2">النوع</th>
+                                <th className="px-3 py-2">المبلغ</th>
+                                <th className="px-3 py-2">المدفوع</th>
+                                <th className="px-3 py-2">المتبقي</th>
+                                <th className="px-3 py-2">الحالة</th>
+                                <th className="px-3 py-2">التاريخ</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {containerDetails.expenses.map((exp) => (
+                                <tr key={exp.id}>
+                                  <td className="px-3 py-2 font-medium">{getExpenseTypeLabel(exp.expense_type)}</td>
+                                  <td className="px-3 py-2">
+                                    {exp.currency === 'USD' ? usdFormat(exp.amount) : lydFormat(exp.amount)}
+                                  </td>
+                                  <td className="px-3 py-2 text-green-700">
+                                    {exp.currency === 'USD' ? usdFormat(exp.paid_amount) : lydFormat(exp.paid_amount)}
+                                  </td>
+                                  <td className="px-3 py-2 text-amber-700">
+                                    {exp.currency === 'USD' ? usdFormat(exp.remaining_amount) : lydFormat(exp.remaining_amount)}
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <span className={`text-xs px-2 py-0.5 rounded-full ${
+                                      exp.status === 'paid' ? 'bg-green-100 text-green-800' :
+                                      exp.status === 'partial' ? 'bg-amber-100 text-amber-800' :
+                                      'bg-red-100 text-red-800'
+                                    }`}>
+                                      {getExpenseStatusLabel(exp.status)}
+                                    </span>
+                                  </td>
+                                  <td className="px-3 py-2 text-slate-500 text-xs">
+                                    {new Date(exp.date).toLocaleDateString('ar-LY')}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Cars in container */}
+                    <div>
+                      <h3 className="font-bold text-slate-800 mb-3 flex items-center justify-between gap-2">
+                        <span className="flex items-center gap-2">
+                          <Car className="w-4 h-4 text-[#0A7C6E]" />
+                          السيارات في الحاوية ({containerDetails.summary.cars_count} / {containerDetails.summary.cars_capacity})
+                        </span>
+                      </h3>
+                      {containerDetails.cars.length === 0 ? (
+                        <p className="text-sm text-slate-500 bg-slate-50 rounded-lg p-4 text-center">
+                          لا توجد سيارات مرتبطة بهذه الحاوية بعد. يمكنك ربط السيارات من صفحة السيارات.
+                        </p>
+                      ) : (
+                        <div className="overflow-x-auto rounded-lg border border-slate-100">
+                          <table className="w-full text-right text-sm">
+                            <thead>
+                              <tr className="bg-slate-50 text-slate-600">
+                                <th className="px-3 py-2">السيارة</th>
+                                <th className="px-3 py-2">VIN</th>
+                                <th className="px-3 py-2">الحالة</th>
+                                <th className="px-3 py-2">التكلفة النهائية</th>
+                                <th className="px-3 py-2"></th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {containerDetails.cars.map((car) => (
+                                <tr key={car.id} className="hover:bg-slate-50/50">
+                                  <td className="px-3 py-2 font-semibold">
+                                    {car.car_name || `${car.brand} ${car.model}`}
+                                    <span className="text-xs text-slate-400 block">{car.year}</span>
+                                  </td>
+                                  <td className="px-3 py-2 font-mono text-xs" dir="ltr">{car.vin_number}</td>
+                                  <td className="px-3 py-2">
+                                    <span className="text-xs bg-slate-100 px-2 py-0.5 rounded">{getCarStatusLabel(car.status)}</span>
+                                  </td>
+                                  <td className="px-3 py-2 font-bold">{lydFormat(Number(car.final_cost || car.purchase_price_lyd))}</td>
+                                  <td className="px-3 py-2">
+                                    <Link
+                                      href={`/cars/${car.id}`}
+                                      className="text-xs text-[#0A7C6E] hover:underline font-semibold"
+                                      onClick={(e) => e.stopPropagation()}
+                                    >
+                                      عرض التفاصيل ←
+                                    </Link>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                ) : null}
+              </CardContent>
+            </Card>
+          </div>
+        )}
 
       </div>
     </RtlLayout>
