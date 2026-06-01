@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '@/hooks/use-auth';
 import { RtlLayout } from '@/components/shared/layout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Loader, Plus, DollarSign, Wallet, FileText, CheckCircle, HelpCircle, Edit, Calendar, Trash2 } from 'lucide-react';
+import { Loader, Plus, DollarSign, Wallet, FileText, Edit, Trash2, Package, ChevronDown, ChevronUp, AlertCircle, CheckCircle2 } from 'lucide-react';
 
 interface Expense {
   id: string;
@@ -21,6 +21,11 @@ interface Expense {
   date: string;
   notes?: string;
   exchange_rate?: number | null;
+  containers?: {
+    id: string;
+    container_number: string;
+    trips?: { trip_name: string } | null;
+  } | null;
 }
 
 interface Trip {
@@ -30,6 +35,23 @@ interface Trip {
 
 interface Container {
   id: string;
+  container_number: string;
+  trips?: { trip_name: string };
+}
+
+const NO_CONTAINER_KEY = '__no_container__';
+
+interface ExpenseGroup {
+  key: string;
+  containerId: string | null;
+  label: string;
+  tripName?: string;
+  expenses: Expense[];
+  remainingUsd: number;
+  remainingLyd: number;
+  remainingEur: number;
+  unpaidCount: number;
+  allPaid: boolean;
 }
 
 export default function ExpensesPage() {
@@ -37,6 +59,7 @@ export default function ExpensesPage() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [trips, setTrips] = useState<Trip[]>([]);
   const [containers, setContainers] = useState<Container[]>([]);
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -174,13 +197,7 @@ export default function ExpensesPage() {
       try {
         const [tripsRes, containersRes] = await Promise.all([
           fetch('/api/trips'),
-          fetch('/api/expenses').then(async (res) => {
-            // Get containers via supabase
-            const { createClient } = require('@/lib/db/client');
-            const supabase = createClient();
-            const { data } = await supabase.from('containers').select('id');
-            return { ok: true, json: async () => data || [] };
-          })
+          fetch('/api/containers'),
         ]);
 
         if (tripsRes.ok) {
@@ -293,6 +310,65 @@ export default function ExpensesPage() {
   const totalPaidAmount = expenses.reduce((sum, e) => sum + Number(e.paid_amount || 0), 0);
   const totalExpensesAmount = expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
 
+  const expenseGroups = useMemo(() => {
+    const map = new Map<string, Expense[]>();
+
+    for (const expense of expenses) {
+      const key = expense.container_id || NO_CONTAINER_KEY;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(expense);
+    }
+
+    const groups: ExpenseGroup[] = Array.from(map.entries()).map(([key, groupExpenses]) => {
+      const first = groupExpenses[0];
+      const containerMeta = first?.containers;
+      const remainingUsd = groupExpenses
+        .filter((e) => e.currency === 'USD')
+        .reduce((s, e) => s + Number(e.remaining_amount || 0), 0);
+      const remainingLyd = groupExpenses
+        .filter((e) => e.currency === 'LYD')
+        .reduce((s, e) => s + Number(e.remaining_amount || 0), 0);
+      const remainingEur = groupExpenses
+        .filter((e) => e.currency === 'EUR')
+        .reduce((s, e) => s + Number(e.remaining_amount || 0), 0);
+      const unpaidCount = groupExpenses.filter((e) => e.status !== 'paid').length;
+
+      return {
+        key,
+        containerId: key === NO_CONTAINER_KEY ? null : key,
+        label:
+          key === NO_CONTAINER_KEY
+            ? 'مصاريف عامة (بدون حاوية)'
+            : containerMeta?.container_number || `حاوية ${key.substring(0, 8)}`,
+        tripName: containerMeta?.trips?.trip_name,
+        expenses: groupExpenses,
+        remainingUsd,
+        remainingLyd,
+        remainingEur,
+        unpaidCount,
+        allPaid: unpaidCount === 0,
+      };
+    });
+
+    return groups.sort((a, b) => {
+      if (a.allPaid !== b.allPaid) return a.allPaid ? 1 : -1;
+      const aDue = a.remainingUsd + a.remainingLyd + a.remainingEur;
+      const bDue = b.remainingUsd + b.remainingLyd + b.remainingEur;
+      return bDue - aDue;
+    });
+  }, [expenses]);
+
+  const containersWithUnpaid = expenseGroups.filter((g) => !g.allPaid && g.containerId).length;
+
+  const toggleGroup = (key: string) => {
+    setExpandedGroups((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const isGroupExpanded = (group: ExpenseGroup) => {
+    if (expandedGroups[group.key] !== undefined) return expandedGroups[group.key];
+    return !group.allPaid;
+  };
+
   if (authLoading || loading) {
     return (
       <RtlLayout>
@@ -366,6 +442,18 @@ export default function ExpensesPage() {
           </Card>
         </div>
 
+        {containersWithUnpaid > 0 && (
+          <div className="bg-amber-50 border border-amber-200 text-amber-900 p-4 rounded-lg flex items-start gap-3 text-sm">
+            <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold">حاويات تحتاج سداد</p>
+              <p className="mt-0.5 text-amber-800">
+                {containersWithUnpaid} حاوية بها مصاريف غير مدفوعة أو مدفوعة جزئياً — راجع المجموعات أدناه.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Add Expense Modal Form */}
         {showAddForm && (
           <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
@@ -430,7 +518,7 @@ export default function ExpensesPage() {
                     </label>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <label className="block">
                       <span className="text-sm text-slate-500 mb-1 block">الرحلة المرتبطة</span>
                       <select
@@ -441,6 +529,22 @@ export default function ExpensesPage() {
                         <option value="">لا يوجد رحلة</option>
                         {trips.map((t) => (
                           <option key={t.id} value={t.id}>{t.trip_name}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="text-sm text-slate-500 mb-1 block">الحاوية المرتبطة</span>
+                      <select
+                        className="w-full h-10 px-3 rounded-md border border-slate-200 dark:border-slate-800 bg-white text-sm"
+                        value={newExpense.container_id}
+                        onChange={(e) => setNewExpense({ ...newExpense, container_id: e.target.value })}
+                      >
+                        <option value="">بدون حاوية</option>
+                        {containers.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.container_number || c.id.substring(0, 8)}
+                            {c.trips?.trip_name ? ` — ${c.trips.trip_name}` : ''}
+                          </option>
                         ))}
                       </select>
                     </label>
@@ -564,79 +668,156 @@ export default function ExpensesPage() {
           </div>
         )}
 
-        {/* Expenses List View Table */}
+        {/* Expenses grouped by container */}
         <Card>
           <CardHeader>
-            <CardTitle>📋 سجل النفقات والتكاليف المسجلة</CardTitle>
-            <CardDescription>تفاصيل الدفعات، الفواتير، والالتزامات المستحقة على الرحلات والحاويات</CardDescription>
+            <CardTitle className="flex items-center gap-2">
+              <Package className="w-5 h-5 text-[#0A7C6E]" />
+              النفقات مجمّعة حسب الحاوية
+            </CardTitle>
+            <CardDescription>
+              كل حاوية تعرض ما تم سداده وما تبقى — الحاويات غير المسددة تظهر في الأعلى
+            </CardDescription>
           </CardHeader>
-          <CardContent className="overflow-x-auto">
+          <CardContent className="space-y-4">
             {expenses.length === 0 ? (
               <div className="p-12 text-center text-slate-500">لا توجد مصاريف أو فواتير مسجلة بعد في النظام.</div>
             ) : (
-              <table className="w-full text-right border-collapse">
-                <thead>
-                  <tr className="border-b border-slate-200 dark:border-slate-800 text-slate-500 text-sm">
-                    <th className="pb-3 pr-2">المصروف والنوع</th>
-                    <th className="pb-3">القيمة الكلية</th>
-                    <th className="pb-3">المدفوع المسدد</th>
-                    <th className="pb-3">الالتزام المتبقي</th>
-                    <th className="pb-3">حالة السداد</th>
-                    <th className="pb-3">التاريخ</th>
-                    <th className="pb-3 pl-2 text-left">العمليات</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-sm">
-                  {expenses.map((expense) => (
-                    <tr key={expense.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
-                      <td className="py-4 pr-2 font-medium">
-                        {getExpenseLabel(expense.expense_type)}
-                        {expense.notes && <span className="block text-xs text-slate-500 mt-1 font-normal">{expense.notes}</span>}
-                      </td>
-                      <td className="py-4">{moneyFormat(expense.amount, expense.currency)}</td>
-                      <td className="py-4 text-green-600">
-                        -{moneyFormat(expense.paid_amount, expense.currency)}
-                        {expense.currency === 'USD' && expense.exchange_rate && (
-                          <span className="block text-xs text-amber-600 mt-1 font-semibold">
-                            صرف: {expense.exchange_rate.toFixed(3)} د.ل
+              expenseGroups.map((group) => {
+                const expanded = isGroupExpanded(group);
+                const hasDue =
+                  group.remainingUsd > 0 || group.remainingLyd > 0 || group.remainingEur > 0;
+
+                return (
+                  <div
+                    key={group.key}
+                    className={`rounded-xl border overflow-hidden ${
+                      group.allPaid
+                        ? 'border-green-200 bg-green-50/20'
+                        : 'border-amber-200 bg-amber-50/30'
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => toggleGroup(group.key)}
+                      className="w-full flex flex-col md:flex-row md:items-center justify-between gap-3 p-4 text-right hover:bg-white/50 transition-colors"
+                    >
+                      <div className="flex items-start gap-3">
+                        {group.containerId ? (
+                          <Package className={`w-5 h-5 mt-0.5 ${group.allPaid ? 'text-green-600' : 'text-amber-600'}`} />
+                        ) : (
+                          <FileText className="w-5 h-5 mt-0.5 text-slate-500" />
+                        )}
+                        <div>
+                          <p className="font-bold text-slate-900">{group.label}</p>
+                          {group.tripName && (
+                            <p className="text-xs text-slate-500 mt-0.5">الرحلة: {group.tripName}</p>
+                          )}
+                          <p className="text-xs text-slate-500 mt-1">
+                            {group.expenses.length} مصروف · {group.unpaidCount} بحاجة سداد
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 md:gap-4">
+                        {group.allPaid ? (
+                          <span className="inline-flex items-center gap-1 text-xs font-bold text-green-700 bg-green-100 px-2.5 py-1 rounded-full">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            مسددة بالكامل
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-xs font-bold text-red-700 bg-red-100 px-2.5 py-1 rounded-full">
+                            <AlertCircle className="w-3.5 h-3.5" />
+                            يتطلب سداد
                           </span>
                         )}
-                      </td>
-                      <td className="py-4 font-semibold text-red-600">
-                        {Number(expense.remaining_amount) > 0 ? moneyFormat(expense.remaining_amount, expense.currency) : '0.00'}
-                      </td>
-                      <td className="py-4">
-                        <span className={`px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap ${getStatusColor(expense.status)}`}>
-                          {getStatusLabel(expense.status)}
-                        </span>
-                      </td>
-                      <td className="py-4 font-mono text-slate-500">
-                        {new Date(expense.date).toLocaleDateString('ar-LY')}
-                      </td>
-                      <td className="py-4 pl-2 text-left space-x-2 space-x-reverse">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-8 text-[#0A7C6E] hover:text-[#086156] border-[#0A7C6E]/20 hover:bg-[#0A7C6E]/5 font-bold inline-flex items-center"
-                          onClick={() => handleOpenPayModal(expense)}
-                        >
-                          <Edit size={12} className="ml-1" />
-                          تعديل / سداد
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-8 text-red-600 hover:text-red-700 border-red-200 hover:bg-red-50 dark:border-red-900/30 dark:hover:bg-red-950/20 font-bold inline-flex items-center"
-                          onClick={() => handleDeleteExpense(expense.id)}
-                        >
-                          <Trash2 size={12} className="ml-1" />
-                          حذف
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                        {hasDue && (
+                          <div className="text-xs font-semibold text-red-700 space-y-0.5">
+                            <p className="text-slate-500 font-normal">المتبقي للسداد:</p>
+                            {group.remainingUsd > 0 && <p>{moneyFormat(group.remainingUsd, 'USD')}</p>}
+                            {group.remainingLyd > 0 && <p>{moneyFormat(group.remainingLyd, 'LYD')}</p>}
+                            {group.remainingEur > 0 && <p>{moneyFormat(group.remainingEur, 'EUR')}</p>}
+                          </div>
+                        )}
+                        {expanded ? (
+                          <ChevronUp className="w-5 h-5 text-slate-400" />
+                        ) : (
+                          <ChevronDown className="w-5 h-5 text-slate-400" />
+                        )}
+                      </div>
+                    </button>
+
+                    {expanded && (
+                      <div className="border-t border-slate-200/80 bg-white overflow-x-auto">
+                        <table className="w-full text-right text-sm">
+                          <thead>
+                            <tr className="bg-slate-50 text-slate-600">
+                              <th className="px-4 py-2">المصروف</th>
+                              <th className="px-4 py-2">الإجمالي</th>
+                              <th className="px-4 py-2">المدفوع</th>
+                              <th className="px-4 py-2">المتبقي</th>
+                              <th className="px-4 py-2">الحالة</th>
+                              <th className="px-4 py-2">التاريخ</th>
+                              <th className="px-4 py-2">العمليات</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {group.expenses.map((expense) => (
+                              <tr key={expense.id} className="hover:bg-slate-50/80">
+                                <td className="px-4 py-3 font-medium">
+                                  {getExpenseLabel(expense.expense_type)}
+                                  {expense.notes && (
+                                    <span className="block text-xs text-slate-500 font-normal mt-0.5">{expense.notes}</span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3">{moneyFormat(expense.amount, expense.currency)}</td>
+                                <td className="px-4 py-3 text-green-600">
+                                  {moneyFormat(expense.paid_amount, expense.currency)}
+                                </td>
+                                <td className="px-4 py-3 font-semibold text-red-600">
+                                  {Number(expense.remaining_amount) > 0
+                                    ? moneyFormat(expense.remaining_amount, expense.currency)
+                                    : '—'}
+                                </td>
+                                <td className="px-4 py-3">
+                                  <span className={`px-2 py-0.5 rounded text-xs font-medium ${getStatusColor(expense.status)}`}>
+                                    {getStatusLabel(expense.status)}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3 text-slate-500 text-xs">
+                                  {new Date(expense.date).toLocaleDateString('ar-LY')}
+                                </td>
+                                <td className="px-4 py-3">
+                                  <div className="flex gap-1 flex-wrap">
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-7 text-xs text-[#0A7C6E] border-[#0A7C6E]/20"
+                                      onClick={() => handleOpenPayModal(expense)}
+                                    >
+                                      <Edit size={11} className="ml-1" />
+                                      سداد
+                                    </Button>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-7 text-xs text-red-600 border-red-100"
+                                      onClick={() => handleDeleteExpense(expense.id)}
+                                    >
+                                      <Trash2 size={11} className="ml-1" />
+                                      حذف
+                                    </Button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                );
+              })
             )}
           </CardContent>
         </Card>
