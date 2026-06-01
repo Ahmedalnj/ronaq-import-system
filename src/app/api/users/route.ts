@@ -19,7 +19,27 @@ type CreateUserBody = {
 };
 
 function getErrorMessage(error: unknown, fallback: string) {
-  return error instanceof Error ? error.message : fallback;
+  if (error instanceof Error) {
+    const message = error.message;
+    if (message.includes('duplicate key') || message.includes('users_pkey')) {
+      return 'المستخدم موجود مسبقاً في النظام';
+    }
+    if (message.includes('users_role_check') || message.includes('check constraint')) {
+      return 'الدور غير مدعوم في قاعدة البيانات. تأكد أن جدول users يقبل admin و user و viewer';
+    }
+    return message;
+  }
+  return fallback;
+}
+
+function isAuthUserExistsError(error: { message?: string; status?: number }) {
+  const message = (error.message || '').toLowerCase();
+  return (
+    error.status === 422 ||
+    message.includes('already been registered') ||
+    message.includes('already registered') ||
+    message.includes('user already registered')
+  );
 }
 
 function withUsernames(users: UserRow[]) {
@@ -134,7 +154,15 @@ export async function POST(request: NextRequest) {
       .maybeSingle();
 
     if (existingProfile) {
-      return NextResponse.json({ error: 'اسم المستخدم موجود مسبقاً' }, { status: 409 });
+      const { data: existingAuth, error: existingAuthError } =
+        await admin.auth.admin.getUserById(existingProfile.id);
+
+      if (!existingAuthError && existingAuth.user) {
+        return NextResponse.json({ error: 'اسم المستخدم موجود مسبقاً' }, { status: 409 });
+      }
+
+      // Orphan profile (no auth account) — remove so we can recreate cleanly
+      await admin.from('users').delete().eq('id', existingProfile.id);
     }
 
     const { data: authData, error: authError } = await admin.auth.admin.createUser({
@@ -147,24 +175,37 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    if (authError) throw authError;
+    if (authError) {
+      if (isAuthUserExistsError(authError)) {
+        return NextResponse.json(
+          { error: 'اسم المستخدم موجود مسبقاً في نظام الدخول' },
+          { status: 409 }
+        );
+      }
+      throw authError;
+    }
+
     if (!authData.user) throw new Error('Failed to create auth user');
     createdAuthUserId = authData.user.id;
 
-    const { data: newUser, error: insertError } = await admin
+    const profilePayload = {
+      id: authData.user.id,
+      email,
+      name,
+      role,
+      permissions,
+      is_active,
+      updated_at: new Date().toISOString(),
+    };
+
+    // Upsert handles Supabase trigger that may auto-insert public.users on auth signup
+    const { data: newUser, error: upsertError } = await admin
       .from('users')
-      .insert({
-        id: authData.user.id,
-        email,
-        name,
-        role,
-        permissions,
-        is_active,
-      })
+      .upsert(profilePayload, { onConflict: 'id' })
       .select()
       .single();
 
-    if (insertError) throw insertError;
+    if (upsertError) throw upsertError;
 
     return NextResponse.json(
       {
@@ -176,7 +217,17 @@ export async function POST(request: NextRequest) {
   } catch (error: unknown) {
     if (createdAuthUserId) {
       try {
-        await createAdminClient().auth.admin.deleteUser(createdAuthUserId);
+        const admin = createAdminClient();
+        const { data: profile } = await admin
+          .from('users')
+          .select('id')
+          .eq('id', createdAuthUserId)
+          .maybeSingle();
+
+        // Only remove auth when no profile row exists (avoid orphan profiles with no login)
+        if (!profile) {
+          await admin.auth.admin.deleteUser(createdAuthUserId);
+        }
       } catch (cleanupError) {
         console.error('Failed to clean up auth user:', cleanupError);
       }
